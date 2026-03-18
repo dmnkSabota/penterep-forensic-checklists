@@ -18,7 +18,7 @@ Jednoduchá
 
 ## Popis
 
-Skript načíta validné súbory z kroku integrity validácie a voliteľne úspešne opravené súbory z kroku opravy, dávkovo extrahuje EXIF metadáta pomocou `exiftool` a vykoná analýzu časovej osi, zariadení, GPS súradníc a detekciu upravených fotografií. Poškodené a neopraviteľné súbory sú vynechané. Ak krok opravy prebehol so stratégiou `skip_repair`, `repair_report.json` neexistuje – skript to ošetrí bez chyby a spracuje iba validné súbory.
+Skript načíta validné súbory z uzla `integrityValidation` (Krok 10) a voliteľne úspešne opravené súbory z uzla `photoRepair` (Krok 12), dávkovo extrahuje EXIF metadáta pomocou `exiftool` a vykoná analýzu časovej osi, zariadení, GPS súradníc a detekciu upravených fotografií. Poškodené a neopraviteľné súbory sú vynechané. Ak krok opravy prebehol so stratégiou `skip_repair`, uzol `photoRepair` neexistuje – skript to ošetrí bez chyby a spracuje iba validné súbory.
 
 ## Jak na to
 
@@ -28,7 +28,7 @@ Skript načíta validné súbory z kroku integrity validácie a voliteľne úspe
 ptexifanalysis PHOTORECOVERY-2025-01-26-001
 ```
 
-Skript načíta `PHOTORECOVERY-2025-01-26-001_validation_report.json` (povinné – zoznam validných súborov) a `PHOTORECOVERY-2025-01-26-001_repair_report.json` (voliteľné – zoznam úspešne opravených súborov). Ak `repair_report.json` neexistuje alebo je neprístupný, skript zaloguje varovanie a pokračuje len s validnými súbormi.
+Skript načíta zoznam validných súborov z uzla `integrityValidation` (Krok 10) a voliteľne zoznam úspešne opravených súborov z uzla `photoRepair` (Krok 12). Ak uzol `photoRepair` neexistuje alebo stratégia bola `skip_repair`, skript zaloguje varovanie a pokračuje len s validnými súbormi.
 
 **2. Dávková extrakcia EXIF:**
 
@@ -48,51 +48,28 @@ Každá fotografia môže mať v EXIF poli `Software` informáciu o programe, kt
 
 Paralelne sa vykonávajú tri kontroly anomálií: ak je `DateTimeOriginal` v budúcnosti, pravdepodobne ide o poškodené EXIF alebo manipuláciu s metadátami. Ak je ISO vyššie ako 25 600, hodnota je pre bežné zariadenia neobvyklá. Ak je `ModifyDate` novší ako `DateTimeOriginal` a pritom chýba `Software` tag, súbor mohol byť potichu upravený bez zanechania stopy v metadátach.
 
-**6. Export výstupov:**
+**6. Výsledky v uzle exifAnalysis:**
 
-Skript uloží do adresára `PHOTORECOVERY-2025-01-26-001_exif_analysis/`:
-- `PHOTORECOVERY-2025-01-26-001_exif_database.json` – kompletná databáza
+Skript automaticky zapíše výsledky do uzla `exifAnalysis` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+- Celkový počet spracovaných súborov
+- Počet EXIF-pozitívnych súborov
+- Počet súborov s DateTimeOriginal
+- Počet súborov s GPS
+- Počet unikátnych zariadení
+- Počet upravených fotografií (Software tag)
+- Počet detekovaných anomálií
+- EXIF quality score – excellent (>90 % DateTimeOriginal) / good (70–90 %) / fair (50–70 %) / poor (<50 %)
+
+**7. Archivácia výstupov:**
+
+Skript automaticky nahrá nasledujúce súbory do záložky **Přílohy** projektu:
+- `PHOTORECOVERY-2025-01-26-001_exif_database.json` – kompletná EXIF databáza
 - `PHOTORECOVERY-2025-01-26-001_exif_data.csv` – Excel-kompatibilný export
 - `PHOTORECOVERY-2025-01-26-001_EXIF_REPORT.txt` – textový report pre klienta
 
-**7. Aktualizácia case JSON:**
-
-Otvorte súbor `PHOTORECOVERY-2025-01-26-001.json` a pridajte uzol `exifAnalysis` a nový záznam `chainOfCustody` do poľa `nodes`:
-
-```json
-{
-  "type": "exifAnalysis",
-  "properties": {
-    "sourcesAnalysed": ["PHOTORECOVERY-2025-01-26-001_validation/valid", "PHOTORECOVERY-2025-01-26-001_repair/repaired"],
-    "totalFilesProcessed": 363,
-    "exifPositive": 318,
-    "withDateTimeOriginal": 298,
-    "withGps": 47,
-    "uniqueDevices": 3,
-    "editedPhotos": 12,
-    "anomaliesDetected": 2,
-    "qualityScore": "good",
-    "exifDatabasePath": "/var/forensics/recovered/PHOTORECOVERY-2025-01-26-001_exif_analysis/PHOTORECOVERY-2025-01-26-001_exif_database.json",
-    "completedAt": "2025-01-26T22:30:00Z"
-  }
-},
-{
-  "type": "chainOfCustody",
-  "properties": {
-    "step": "step13-exif-analysis",
-    "action": "EXIF analysis completed – 363 files processed (341 valid + 22 repaired), quality score: good (87.4% DateTimeOriginal)",
-    "analyst": "Dominik Sabota",
-    "timestamp": "2025-01-26T22:30:00Z",
-    "notes": null
-  }
-}
-```
-
-Ak bol krok opravy preskočený (`skip_repair`), pole `sourcesAnalysed` bude obsahovať len `validation/valid` a počet opravených súborov bude 0.
-
 ## Výsledek
 
-Kompletná EXIF databáza v adresári `PHOTORECOVERY-2025-01-26-001_exif_analysis/` s per-file metadátami, časovou osou a GPS zoznamom. CSV export pre ďalšie spracovanie. EXIF quality score: excellent (>90 % DateTimeOriginal), good (70–90 %), fair (50–70 %), poor (<50 %). Aktualizovaný case JSON súbor s uzlom `exifAnalysis` a ďalším záznamom `chainOfCustody`. Workflow pokračuje do kroku Finálny report.
+Kompletná EXIF databáza s per-file metadátami, časovou osou a GPS zoznamom. CSV export pre ďalšie spracovanie. Výsledky zaznamenané v uzle `exifAnalysis`. Workflow pokračuje do kroku Finálny report.
 
 ## Reference
 

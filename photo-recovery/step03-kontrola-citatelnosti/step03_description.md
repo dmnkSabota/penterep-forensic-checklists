@@ -88,54 +88,19 @@ Na základe výsledkov klasifikujte médium a vyberte nástroj pre Krok 5:
 
 Ak boli identifikované kritické nálezy (aktívny TRIM, zlý SMART status, šifrovanie, RAID), informujte klienta o limitáciách recovery pred pokračovaním.
 
-**5. Aktualizácia case JSON:**
+**5. Aktualizácia záznamu na Penterep:**
 
-Otvorte súbor `PHOTORECOVERY-2025-01-26-001.json` a pridajte uzol `readabilityTest` a nový záznam `chainOfCustody` do poľa `nodes`:
-
-```json
-{
-  "type": "readabilityTest",
-  "properties": {
-    "devicePath": "/dev/sdX",
-    "mediaStatus": "READABLE",
-    "detectionResults": {
-      "lsblk": "detected",
-      "blkid": "FAT32",
-      "smartctl": "ok",
-      "hdparm": "TRIM not supported",
-      "mdadm": "not applicable"
-    },
-    "diagnosticTests": {
-      "firstSector": "pass",
-      "sequential1MB": "pass",
-      "positionStart": "pass",
-      "positionMiddle": "pass",
-      "positionEnd": "pass",
-      "readSpeed": "18.4 MB/s"
-    },
-    "criticalFindings": [],
-    "selectedTool": "dc3dd",
-    "reportPath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001_readability_report.json",
-    "completedAt": "2025-01-26T12:30:00Z"
-  }
-},
-{
-  "type": "chainOfCustody",
-  "properties": {
-    "step": "step03-test-citatelnosti",
-    "action": "Readability test completed – media classified as READABLE, dc3dd selected for imaging",
-    "analyst": "Dominik Sabota",
-    "timestamp": "2025-01-26T12:30:00Z",
-    "notes": null
-  }
-}
-```
-
-Pre stav PARTIAL nastavte `"mediaStatus": "PARTIAL"` a `"selectedTool": "ddrescue"`. Pre stav UNREADABLE nastavte `"mediaStatus": "UNREADABLE"` a `"selectedTool": null`.
+Po vyhodnotení výsledkov skript automaticky zapíše výsledky do uzla `readabilityTest` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty pre nasledujúce polia:
+- `devicePath` – cesta k zariadeniu (napr. `/dev/sdX`)
+- `mediaStatus` – `READABLE` / `PARTIAL` / `UNREADABLE`
+- `detectionResults` – výsledky lsblk, blkid, smartctl, hdparm, mdadm
+- `diagnosticTests` – výsledky jednotlivých dd testov a rýchlosť čítania
+- `criticalFindings` – zoznam kritických nálezov (TRIM, SMART, šifrovanie, RAID)
+- `selectedTool` – `dc3dd` / `ddrescue` / `null`
 
 ## Výsledek
 
-Stav média je klasifikovaný ako READABLE, PARTIAL alebo UNREADABLE. Výsledky predbežnej detekcie (lsblk, blkid, smartctl, hdparm, mdadm) a všetkých diagnostických testov sú zaznamenané v `PHOTORECOVERY-2025-01-26-001_readability_report.json`. Klient je informovaný o prípadných kritických limitáciách. Aktualizovaný case JSON súbor s uzlom `readabilityTest` a ďalším záznamom `chainOfCustody`. Analytik pokračuje do príslušného kroku.
+Stav média je klasifikovaný ako READABLE, PARTIAL alebo UNREADABLE. Výsledky predbežnej detekcie (lsblk, blkid, smartctl, hdparm, mdadm) a všetkých diagnostických testov sú zaznamenané v uzle `readabilityTest`. Klient je informovaný o prípadných kritických limitáciách. Analytik pokračuje do príslušného kroku.
 
 ## Reference
 

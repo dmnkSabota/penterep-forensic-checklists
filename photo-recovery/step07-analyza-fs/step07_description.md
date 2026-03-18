@@ -24,7 +24,7 @@ Analýza súborového systému je prvý krok forenznej analýzy po vytvorení a 
 
 **1. Spustenie analýzy:**
 
-Skript automaticky načíta cestu k forenzném obrazu zo súboru `PHOTORECOVERY-2025-01-26-001_verification.json`.
+Skript automaticky načíta cestu k forenzného obrazu z uzla `hashVerification` (Krok 6):
 
 ```bash
 ptfilesystemanalysis PHOTORECOVERY-2025-01-26-001
@@ -38,53 +38,30 @@ Skript detekuje typ tabuľky (DOS/MBR, GPT) a zoznam partícií s ich offsetmi. 
 
 Pre každú partíciu skript extrahuje metadáta súborového systému: typ (FAT32, exFAT, NTFS, ext4...), volume label, UUID, veľkosť sektora a klastra. Následne rekurzívne listuje adresárovú štruktúru vrátane vymazaných súborov (označené `*`) a spočíta aktívne a vymazané obrazové súbory (.jpg, .png, .raw, .cr2, .nef a ďalšie).
 
-**4. Aktualizácia case JSON:**
+**4. Výsledky v uzle filesystemAnalysis:**
 
-Otvorte súbor `PHOTORECOVERY-2025-01-26-001.json` a pridajte uzol `filesystemAnalysis` a nový záznam `chainOfCustody` do poľa `nodes`:
+Skript automaticky zapíše výsledky do uzla `filesystemAnalysis` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+- Typ partičnej tabuľky – DOS/MBR / GPT / superfloppy
+- Partície – zoznam s offsetmi, typom FS, stavom, volume label, UUID, veľkosťou sektora a klastra
+- Stav súborového systému – recognized / unrecognized / damaged
+- Čitateľnosť adresárovej štruktúry – áno / nie
+- Počet aktívnych obrazových súborov
+- Počet vymazaných obrazových súborov
+- Stratégia obnovy – `filesystem_scan` / `file_carving` / `hybrid`
 
-```json
-{
-  "type": "filesystemAnalysis",
-  "properties": {
-    "imagePath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd",
-    "partitionTable": "DOS/MBR",
-    "partitions": [
-      {
-        "index": 0,
-        "offsetSectors": 0,
-        "type": "FAT32",
-        "status": "recognized",
-        "volumeLabel": "SANDISK",
-        "uuid": null,
-        "sectorSize": 512,
-        "clusterSize": 4096
-      }
-    ],
-    "filesystemStatus": "recognized",
-    "directoryReadable": true,
-    "activeImageFiles": 142,
-    "deletedImageFiles": 38,
-    "recoveryStrategy": "filesystem_scan",
-    "completedAt": "2025-01-26T14:45:00Z"
-  }
-},
-{
-  "type": "chainOfCustody",
-  "properties": {
-    "step": "step07-analyza-suboroveho-systemu",
-    "action": "Filesystem analysis completed – FAT32 recognized, filesystem_scan strategy selected",
-    "analyst": "Dominik Sabota",
-    "timestamp": "2025-01-26T14:45:00Z",
-    "notes": null
-  }
-}
-```
+Hodnota stratégie obnovy určuje postup v nasledujúcom kroku:
+- `filesystem_scan` – rozpoznaný FS + čitateľná štruktúra
+- `file_carving` – nerozpoznaný FS
+- `hybrid` – rozpoznaný FS ale poškodená štruktúra
 
-Hodnota `recoveryStrategy` určuje postup v nasledujúcom kroku: `filesystem_scan` (rozpoznaný FS + čitateľná štruktúra), `file_carving` (nerozpoznaný FS), alebo `hybrid` (rozpoznaný FS ale poškodená štruktúra).
+**5. Archivácia výstupov:**
+
+Skript automaticky nahrá nasledujúci súbor do záložky **Přílohy** projektu:
+- `PHOTORECOVERY-2025-01-26-001_filesystem_analysis.json` – kompletný výsledok analýzy
 
 ## Výsledek
 
-Typ súborového systému identifikovaný, stav a čitateľnosť adresárovej štruktúry overené. Skript uloží `PHOTORECOVERY-2025-01-26-001_filesystem_analysis.json` s kompletným výsledkom analýzy vrátane partition table, FS typu, počtu obrazových súborov a odporúčanej recovery stratégie. Aktualizovaný case JSON súbor s uzlom `filesystemAnalysis` a ďalším záznamom `chainOfCustody`. Workflow pokračuje do nasledujúceho kroku (Rozhodnutie o stratégii obnovy).
+Typ súborového systému identifikovaný, stav a čitateľnosť adresárovej štruktúry overené. Výsledky zaznamenané v uzle `filesystemAnalysis` vrátane partition table, FS typu, počtu obrazových súborov a odporúčanej recovery stratégie. Workflow pokračuje do nasledujúceho kroku.
 
 ## Reference
 

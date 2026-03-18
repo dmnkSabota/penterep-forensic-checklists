@@ -18,11 +18,20 @@ Nie
 
 ## Popis
 
-Fyzická identifikácia média zabezpečuje jeho jednoznačné odlíšenie od ostatných artefaktov v laboratóriu a vytvára základ pre Chain of Custody dokumentáciu v súlade s ISO/IEC 27037:2012. Všetky záznamy z tohto kroku sú priamo prepojené s Case ID z kroku 1 a pridávajú sa do centrálneho case JSON súboru.
+Fyzická identifikácia média zabezpečuje jeho jednoznačné odlíšenie od ostatných artefaktov v laboratóriu a vytvára základ pre Chain of Custody dokumentáciu v súlade s ISO/IEC 27037:2012. Všetky záznamy z tohto kroku sú priamo prepojené s Case ID z kroku 1.
 
 ## Jak na to
 
-**1. Fotodokumentácia:**
+**1. Informácie o médiu (podľa klienta):**
+
+Zaznamenajte do formulára základné informácie podľa toho, čo klient uvádza:
+- **Typ zariadenia** – SD karta / microSD / USB flash disk / HDD / SSD / iné
+- **Odhadovaná kapacita** – podľa vyjadrenia klienta
+- **Viditeľné poškodenie** – popis alebo žiadne
+
+Tieto údaje budú overené fyzicky v nasledujúcich krokoch.
+
+**2. Fotodokumentácia:**
 
 Vyhotovte komplexnú fotodokumentáciu média – minimálne 8 záberov:
 - Celkový záber s mierkou
@@ -30,88 +39,49 @@ Vyhotovte komplexnú fotodokumentáciu média – minimálne 8 záberov:
 - Makro detail sériového čísla
 - Detail každého viditeľného poškodenia alebo anomálie
 
-**2. Fyzické identifikátory:**
+Do formulára zadajte **Počet fotografií** a po archivácii aktivujte prepínač **Fotografie archivované**.
 
-Zaznamenajte do formulára: výrobcu, typové označenie modelu, úplné sériové číslo, farbu a materiál púzdra, presné rozmery v mm a kapacitu z nálepky zariadenia. Zaznamenajte aj typ zariadenia (SSD, HDD, USB flash disk, SD karta) – určuje, ktoré diagnostické nástroje budú relevantné v Kroku 3.
+**3. Fyzické identifikátory:**
 
-**3. Fyzický stav média:**
+Zaznamenajte do formulára overené fyzické parametre zariadenia: **Výrobca**, **Model**, **Sériové číslo** (úplné), **Farba / materiál**, **Dĺžka (mm)**, **Šírka (mm)**, **Výška (mm)** a **Kapacita (nálepka)** z fyzickej nálepky zariadenia. Typ zariadenia určuje, ktoré diagnostické nástroje budú relevantné v Kroku 3.
 
-Zdokumentujte celkový stav zariadenia (nové / mierne použité / intenzívne použité / poškodené), stav nálepiek a štítkov, a viditeľné stopy používania – škrabance, znečistenie, zmeny farby.
+**4. Fyzický stav média:**
 
-**4. Fyzické poškodenie:**
+Vyberte **Stav zariadenia** (nové / mierne použité / intenzívne použité / poškodené) a do poľa **Poznámka k stavu** zaznamenajte viditeľné stopy používania – škrabance, znečistenie, zmeny farby, stav nálepiek.
 
-Detailne popíšte typ poškodenia (prasklina púzdra, zlomený konektor, deformácia, korózia kontaktov), presnú lokalizáciu na zariadení a závažnosť:
-- Malé – kozmetické, funkčnosť neovplyvnená
-- Stredné – čiastočne funkčné, vyžaduje opravu
-- Kritické – znemožňuje pripojenie
+**5. Fyzické poškodenie:**
 
-**5. Viditeľné indikátory šifrovania:**
+Ak je poškodenie prítomné, aktivujte prepínač **Poškodenie prítomné** a vyplňte:
+- **Typ poškodenia** – prasklina púzdra / zlomený konektor / deformácia / korózia kontaktov
+- **Lokalizácia poškodenia** – presné miesto na zariadení
+- **Závažnosť poškodenia:**
+  - Malé – kozmetické, funkčnosť neovplyvnená
+  - Stredné – čiastočne funkčné, vyžaduje opravu
+  - Kritické – znemožňuje pripojenie
 
-Skontrolujte, či médium nenesie viditeľné znaky šifrovania – BitLocker štítok od výrobcu, VeraCrypt bootloader nálepku, alebo firemný bezpečnostný štítok. Ak sú prítomné, zaznamenajte ich a informujte klienta, že recovery kľúč alebo heslo bude nevyhnutné. Technická verifikácia šifrovania prebehne v Kroku 3.
+**6. Viditeľné indikátory šifrovania:**
 
-**6. Fyzické označenie:**
+Skontrolujte, či médium nenesie viditeľné znaky šifrovania – BitLocker štítok od výrobcu, VeraCrypt bootloader nálepku, alebo firemný bezpečnostný štítok. Ak sú prítomné, aktivujte prepínač **Indikátor šifrovania viditeľný** a informujte klienta, že recovery kľúč alebo heslo bude nevyhnutné. Technická verifikácia šifrovania prebehne v Kroku 3.
 
-Nalepte štítok s Case ID na médium – nie na konektor, nie cez sériové číslo, nie cez pôvodné výrobné nálepky.
+**7. Fyzické označenie:**
 
-**7. Archivácia fotografií a formulárov:**
+Nalepte štítok s Case ID na médium – nie na konektor, nie cez sériové číslo, nie cez pôvodné výrobné nálepky. Po nalepení aktivujte prepínač **Štítok nalepený**.
 
-Všetky fotografie a formuláre uložte do dokumentácie Case pod príslušným Case ID.
+**8. Archivácia fotografií a formulárov:**
 
-**8. Aktualizácia case JSON:**
+Všetky fotografie a formuláre uložte do dokumentácie Case pod príslušným Case ID a potvrďte archiváciu vo formulári scenára.
 
-Otvorte súbor `PHOTORECOVERY-2025-01-26-001.json` a pridajte uzol `mediaIdentify` a nový záznam `chainOfCustody` do poľa `nodes`:
+**9. Aktualizácia záznamu:**
 
-```json
-{
-  "type": "mediaIdentify",
-  "properties": {
-    "deviceType": "USB flash disk",
-    "manufacturer": "SanDisk",
-    "model": "Ultra 32GB",
-    "serialNumber": "SN123456789",
-    "capacity": "32GB",
-    "color": "šedá",
-    "dimensions": {
-      "lengthMm": 32,
-      "widthMm": 24,
-      "heightMm": 2
-    },
-    "condition": "poškodené",
-    "conditionNotes": "škrabance na povrchu, nálepka čiastočne odlúpnutá",
-    "damagePresent": true,
-    "damage": {
-      "type": "zlomený konektor",
-      "location": "pravá strana",
-      "severity": "stredné"
-    },
-    "encryptionIndicatorVisible": false,
-    "labelApplied": true,
-    "photosCount": 8,
-    "photosArchived": true,
-    "completedAt": "2025-01-26T10:50:00Z"
-  }
-},
-{
-  "type": "chainOfCustody",
-  "properties": {
-    "step": "step02-identifikacia-media",
-    "action": "Physical media identification and photo documentation completed",
-    "analyst": "Dominik Sabota",
-    "timestamp": "2025-01-26T10:50:00Z",
-    "notes": null
-  }
-}
-```
-
-Ak médium nie je poškodené, nastavte `"damagePresent": false` a vynechajte objekt `"damage"`.
+Skontrolujte, že všetky povinné polia formulára sú vyplnené a potvrďte krok.
 
 ## Výsledek
 
-M�dium je identifikované a zdokumentované. Vytvorené výstupy:
+Médium je identifikované a zdokumentované. Vytvorené výstupy:
 - Fotodokumentácia (minimálne 8 fotografií) archivovaná pod Case ID
 - Identifikačný formulár s kompletnými fyzickými parametrami
 - Fyzický štítok s Case ID nalepený na médium
-- Aktualizovaný case JSON súbor s uzlom `mediaIdentify` a druhým záznamom `chainOfCustody`
+- Vyplnený uzol identifikácie média s druhým záznamom `chainOfCustody`
 
 ## Reference
 

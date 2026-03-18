@@ -18,7 +18,7 @@ Stredná
 
 ## Popis
 
-Záverečná správa konsoliduje výstupy všetkých predchádzajúcich krokov do jedného dokumentu. Načíta `validation_report.json` (povinné) a voliteľne `exif_database.json` a `repair_report.json`, a zostaví 10-sekčnú správu. Výstupom je `FINAL_REPORT.json`, voliteľný `FINAL_REPORT.pdf` a `README.txt` pre klienta.
+Záverečná správa konsoliduje výstupy všetkých predchádzajúcich krokov do jedného dokumentu. Načíta výsledky z uzlov `integrityValidation` (Krok 10), `exifAnalysis` (Krok 13) a voliteľne `photoRepair` (Krok 12), a zostaví 10-sekčnú správu. Výstupom je `FINAL_REPORT.json`, voliteľný `FINAL_REPORT.pdf` a `README.txt` pre klienta.
 
 ## Jak na to
 
@@ -29,11 +29,11 @@ ptfinalreport PHOTORECOVERY-2025-01-26-001
 ```
 
 Skript načíta nasledujúce vstupy:
-- `PHOTORECOVERY-2025-01-26-001_validation_report.json` (povinné)
-- `PHOTORECOVERY-2025-01-26-001_exif_analysis/PHOTORECOVERY-2025-01-26-001_exif_database.json` (voliteľné)
-- `PHOTORECOVERY-2025-01-26-001_repair_report.json` (voliteľné)
+- Uzol `integrityValidation` (Krok 10) – povinné
+- Uzol `exifAnalysis` (Krok 13) – voliteľné
+- Uzol `photoRepair` (Krok 12) – voliteľné
 
-Absencia voliteľných súborov nespôsobí chybu – príslušné sekcie reportu sa jednoducho vynechajú.
+Absencia voliteľných uzlov nespôsobí chybu – príslušné sekcie reportu sa jednoducho vynechajú.
 
 **2. Zostavenie 10-sekčnej správy:**
 
@@ -47,42 +47,26 @@ Ak je nainštalovaný `reportlab`, vygeneruje dokument formátu A4 s titulnou st
 
 `README.txt` s inštrukciami pre klienta a `delivery_checklist.json` so statusom položiek (peer review a podpisy sú PENDING).
 
-**5. Záverečné uloženie:**
+**5. Výsledky v uzle finalReport:**
 
-`FINAL_REPORT.json` s 10 sekciami obsahuje všetky výsledky, reťazec úschovy a technické detaily v jednom súbore.
+Skript automaticky zapíše výsledky do uzla `finalReport` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+- Celkový počet obnovených fotografií
+- Integrity score
+- Hodnotenie kvality – Very Good / Good / Fair / Poor
+- Počet vygenerovaných sekcií
+- PDF vygenerované – áno / nie
 
-**6. Aktualizácia case JSON:**
+**6. Archivácia výstupov:**
 
-Otvorte súbor `PHOTORECOVERY-2025-01-26-001.json` a pridajte uzol `finalReport` a nový záznam `chainOfCustody` do poľa `nodes`:
-
-```json
-{
-  "type": "finalReport",
-  "properties": {
-    "totalPhotosRecovered": 363,
-    "integrityScore": 89.3,
-    "qualityRating": "Very Good",
-    "sectionsGenerated": 10,
-    "pdfGenerated": true,
-    "reportPath": "/var/forensics/recovered/PHOTORECOVERY-2025-01-26-001_final_report/FINAL_REPORT.json",
-    "completedAt": "2025-01-26T23:30:00Z"
-  }
-},
-{
-  "type": "chainOfCustody",
-  "properties": {
-    "step": "step14-final-report",
-    "action": "Záverečná správa vygenerovaná – 363 fotografií obnovených, integrita 89.3%, hodnotenie: Very Good",
-    "analyst": "Dominik Sabota",
-    "timestamp": "2025-01-26T23:30:00Z",
-    "notes": "Kontrola a podpisy sú povinné pred odovzdaním klientovi"
-  }
-}
-```
+Skript automaticky nahrá nasledujúce súbory do záložky **Přílohy** projektu:
+- `FINAL_REPORT.json` – kompletná záverečná správa (10 sekcií)
+- `FINAL_REPORT.pdf` – voliteľný, len ak je nainštalovaný reportlab
+- `README.txt` – inštrukcie pre klienta
+- `delivery_checklist.json` – zoznam položiek pred odovzdaním
 
 ## Výsledek
 
-Adresár `PHOTORECOVERY-2025-01-26-001_final_report/` s: `FINAL_REPORT.json` (10 sekcií), `FINAL_REPORT.pdf` (voliteľný), `README.txt`, `delivery_checklist.json`. Kontrola nadriadeným analytikom a podpisy sú povinné pred odovzdaním. Aktualizovaný case JSON súbor s uzlom `finalReport` a ďalším záznamom `chainOfCustody`.
+Záverečná správa vygenerovaná a zaznamenaná v uzle `finalReport`. Kontrola nadriadeným analytikom a podpisy sú povinné pred odovzdaním. Workflow pokračuje do kroku Odovzdanie klientovi.
 
 ## Reference
 

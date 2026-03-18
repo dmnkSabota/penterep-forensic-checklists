@@ -28,7 +28,7 @@ Skript zjednotí výstupy z krokov obnovy do jedného organizovaného datasetu p
 ptrecoveryconsolidation PHOTORECOVERY-2025-01-26-001
 ```
 
-Skript overí existenciu `PHOTORECOVERY-2025-01-26-001_recovered/` (filesystem recovery) a `PHOTORECOVERY-2025-01-26-001_carved/organized/` (file carving). Ak žiadny zdroj neexistuje, odmietne pokračovať.
+Skript overí existenciu výstupov z uzlov `filesystemRecovery` (Krok 8a) a `fileCarvingRecovery` (Krok 8b). Ak žiadny zdroj neexistuje, odmietne pokračovať.
 
 **2. Inventarizácia:**
 
@@ -63,43 +63,26 @@ FS-based súbory zachovávajú pôvodný názov (s kolíznou ochranou), carved s
 
 **5. Master katalóg:**
 
-Skript uloží `PHOTORECOVERY-2025-01-26-001_consolidated/master_catalog.json` s kompletným inventárom (ID, názov, hash, veľkosť, formát, zdroj, cesta) a štatistikami. Textový report `CONSOLIDATION_REPORT.txt` obsahuje prehľad pre klienta.
+Skript uloží `master_catalog.json` s kompletným inventárom (ID, názov, hash, veľkosť, formát, zdroj, cesta) a štatistikami. Textový report `CONSOLIDATION_REPORT.txt` obsahuje prehľad pre klienta.
 
-**6. Aktualizácia case JSON:**
+**6. Výsledky v uzle recoveryConsolidation:**
 
-Otvorte súbor `PHOTORECOVERY-2025-01-26-001.json` a pridajte uzol `recoveryConsolidation` a nový záznam `chainOfCustody` do poľa `nodes`:
+Skript automaticky zapíše výsledky do uzla `recoveryConsolidation` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+- Počet súborov z filesystem recovery
+- Počet súborov z file carving
+- Počet odstránených duplikátov
+- Počet finálnych unikátnych súborov
+- Celková veľkosť datasetu (bajty)
 
-```json
-{
-  "type": "recoveryConsolidation",
-  "properties": {
-    "sourceFsBased": "/var/forensics/recovered/PHOTORECOVERY-2025-01-26-001_recovered",
-    "sourceCarved": "/var/forensics/recovered/PHOTORECOVERY-2025-01-26-001_carved/organized",
-    "outputDirectory": "/var/forensics/recovered/PHOTORECOVERY-2025-01-26-001_consolidated",
-    "totalFromFsBased": 173,
-    "totalFromCarved": 298,
-    "duplicatesRemoved": 89,
-    "finalUniqueFiles": 382,
-    "datasetSizeBytes": 1847392841,
-    "masterCatalogPath": "/var/forensics/recovered/PHOTORECOVERY-2025-01-26-001_consolidated/master_catalog.json",
-    "completedAt": "2025-01-26T21:00:00Z"
-  }
-},
-{
-  "type": "chainOfCustody",
-  "properties": {
-    "step": "step09-recovery-consolidation",
-    "action": "Recovery consolidation completed – 382 unique files from 2 sources, 89 duplicates removed",
-    "analyst": "Dominik Sabota",
-    "timestamp": "2025-01-26T21:00:00Z",
-    "notes": null
-  }
-}
-```
+**7. Archivácia výstupov:**
+
+Skript automaticky nahrá nasledujúce súbory do záložky **Přílohy** projektu:
+- `master_catalog.json` – kompletný inventár všetkých súborov
+- `CONSOLIDATION_REPORT.txt` – textový prehľad pre klienta
 
 ## Výsledek
 
-Konsolidovaný dataset v `PHOTORECOVERY-2025-01-26-001_consolidated/`: podadresáre `fs_based/{jpg,png,tiff,raw,other}/` a `carved/{jpg,png,tiff,raw,other}/` organizované podľa zdroja aj formátu, `duplicates/` pre auditné kópie. `PHOTORECOVERY-2025-01-26-001_consolidated/master_catalog.json` obsahuje kompletný inventár všetkých súborov. Aktualizovaný case JSON súbor s uzlom `recoveryConsolidation` a ďalším záznamom `chainOfCustody`. Workflow pokračuje do kroku Validácia integrity fotografií.
+Konsolidovaný dataset v `PHOTORECOVERY-2025-01-26-001_consolidated/`: podadresáre `fs_based/{jpg,png,tiff,raw,other}/` a `carved/{jpg,png,tiff,raw,other}/` organizované podľa zdroja aj formátu, `duplicates/` pre auditné kópie. Výsledky zaznamenané v uzle `recoveryConsolidation`. Workflow pokračuje do kroku Validácia integrity fotografií.
 
 ## Reference
 

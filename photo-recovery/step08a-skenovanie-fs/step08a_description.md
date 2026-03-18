@@ -28,7 +28,7 @@ Skript identifikuje všetky obrazové súbory (aktívne aj vymazané) pomocou `f
 ptfilesystemrecovery PHOTORECOVERY-2025-01-26-001
 ```
 
-Skript načíta súbor `PHOTORECOVERY-2025-01-26-001_filesystem_analysis.json` z predošlého kroku a overí odporúčanú metódu. Pri `hybrid` pokračuje normálne a na konci upozorní na nutnosť spustiť aj krok File Carving.
+Skript načíta stratégiu obnovy z uzla `filesystemAnalysis` (Krok 7) a overí odporúčanú metódu. Pri `hybrid` pokračuje normálne a na konci upozorní na nutnosť spustiť aj krok File Carving.
 
 **2. Overenie nástrojov:**
 
@@ -46,47 +46,27 @@ Pre každý súbor skript spustí `icat` a uloží výstup so zachovaním pôvod
 
 Pre každý validný súbor skript extrahuje FS timestamps (mtime, atime, ctime) a EXIF metadáta (`exiftool -json`). Metadáta sa uložia ako individuálny JSON súbor do `metadata/`.
 
-**6. Aktualizácia case JSON:**
+**6. Výsledky v uzle filesystemRecovery:**
 
-Otvorte súbor `PHOTORECOVERY-2025-01-26-001.json` a pridajte uzol `filesystemRecovery` a nový záznam `chainOfCustody` do poľa `nodes`:
+Skript automaticky zapíše výsledky do uzla `filesystemRecovery` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+- Metóda obnovy – filesystem_scan / hybrid
+- Počet prehľadaných súborov
+- Počet obnovených aktívnych súborov
+- Počet obnovených vymazaných súborov
+- Počet poškodených súborov
+- Úspešnosť obnovy aktívnych súborov (%)
+- Úspešnosť obnovy vymazaných súborov (%)
+- Extrakcia metadát – áno / nie
+- Nutnosť následného File Carving – áno / nie (pri `hybrid`)
 
-```json
-{
-  "type": "filesystemRecovery",
-  "properties": {
-    "recoveryMethod": "filesystem_scan",
-    "imagePath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd",
-    "outputDirectory": "/var/forensics/recovered/PHOTORECOVERY-2025-01-26-001_recovered",
-    "filesScanned": 180,
-    "activeRecovered": 142,
-    "deletedRecovered": 31,
-    "corrupted": 7,
-    "invalid": 0,
-    "successRateActive": 100.0,
-    "successRateDeleted": 81.6,
-    "metadataExtracted": true,
-    "hybridFollowupRequired": false,
-    "reportPath": "/var/forensics/recovered/PHOTORECOVERY-2025-01-26-001_recovery_report.json",
-    "completedAt": "2025-01-26T15:30:00Z"
-  }
-},
-{
-  "type": "chainOfCustody",
-  "properties": {
-    "step": "step08a-filesystem-recovery",
-    "action": "Filesystem-based recovery completed – 173 files recovered (142 active, 31 deleted)",
-    "analyst": "Dominik Sabota",
-    "timestamp": "2025-01-26T15:30:00Z",
-    "notes": null
-  }
-}
-```
+**7. Archivácia výstupov:**
 
-Pri stratégii `hybrid` nastavte `"hybridFollowupRequired": true` – signalizuje, že je potrebné spustiť aj krok File Carving.
+Skript automaticky nahrá nasledujúci súbor do záložky **Přílohy** projektu:
+- `PHOTORECOVERY-2025-01-26-001_recovery_report.json` – kompletný report obnovy
 
 ## Výsledek
 
-Obnovené súbory uložené v `PHOTORECOVERY-2025-01-26-001_recovered/`: aktívne v `active/`, vymazané v `deleted/`, čiastočne poškodené v `corrupted/`. Aktualizovaný case JSON súbor s uzlom `filesystemRecovery` a ďalším záznamom `chainOfCustody`. Workflow pokračuje do kroku File Carving (ak `hybrid`) alebo priamo do kroku Katalogizácia fotografií.
+Obnovené súbory uložené v `PHOTORECOVERY-2025-01-26-001_recovered/`: aktívne v `active/`, vymazané v `deleted/`, čiastočne poškodené v `corrupted/`. Výsledky zaznamenané v uzle `filesystemRecovery`. Workflow pokračuje do kroku File Carving (ak `hybrid`) alebo priamo do kroku Katalogizácia fotografií.
 
 ## Reference
 

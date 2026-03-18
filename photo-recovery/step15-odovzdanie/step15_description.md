@@ -44,43 +44,25 @@ Pridaj záverečný záznam „vrátené klientovi", získaj podpisy všetkých 
 
 Archivuj všetky súbory s retenčnou lehotou 7 rokov v zmysle GDPR čl. 30. Aktualizuj stav prípadu v databáze na `UZAVRETÝ` a zaznamenaj súhrn priebehu vrátane ponaučení pre budúce prípady.
 
-**6. Aktualizácia case JSON:**
+**6. Vyplnenie uzla caseDelivery na Penterep:**
 
-Otvor súbor `PHOTORECOVERY-2025-01-26-001.json`, pridaj uzol `caseDelivery` a záverečný záznam `chainOfCustody` do poľa `nodes`. Súčasne aktualizuj hodnotu `status` v hlavnom objekte `properties` z `"INITIATED"` na `"CLOSED"`:
-```json
-{
-  "type": "caseDelivery",
-  "properties": {
-    "deliveryMethod": "osobné odovzdanie",
-    "deliveredTo": "Jan Novak",
-    "identityVerified": true,
-    "originalMediaReturned": true,
-    "protocolSigned": true,
-    "manifestPath": "/var/forensics/delivery/PHOTORECOVERY-2025-01-26-001/MANIFEST.json",
-    "totalFilesDelivered": 363,
-    "archiveRetentionYears": 7,
-    "caseStatus": "CLOSED",
-    "completedAt": "2025-01-26T16:00:00Z"
-  }
-},
-{
-  "type": "chainOfCustody",
-  "properties": {
-    "step": "step15-odovzdanie-klientovi",
-    "action": "Case closed – all materials delivered to client, original media returned, Chain of Custody complete",
-    "analyst": "Dominik Sabota",
-    "timestamp": "2025-01-26T16:00:00Z",
-    "notes": "Odovzdávací protokol podpísaný oboma stranami. Prípad archivovaný s retenčnou lehotou 7 rokov."
-  }
-}
-```
+Vyplňte formulár uzla `caseDelivery` nasledujúcimi údajmi:
+- Spôsob odovzdania – osobné odovzdanie / kuriér / elektronické odovzdanie
+- Odovzdané komu – meno klienta
+- Totožnosť overená – potvrďte po overení
+- Pôvodné médium vrátené – potvrďte po odovzdaní
+- Odovzdávací protokol podpísaný – potvrďte po podpise
+- Počet odovzdaných súborov
+- Retenčná lehota archivácie (roky) – štandardne 7
+- Stav prípadu – CLOSED
 
-Pri elektronickom odovzdaní nastav `"deliveryMethod": "elektronické odovzdanie"` a doplň pole `"secureLink"` s URL a dobou platnosti. Pri kuriérskej preprave nastav `"deliveryMethod": "kuriér"` a doplň pole `"trackingNumber"`.
+Pri elektronickom odovzdaní doplňte pole so zabezpečeným odkazom a dobou platnosti. Pri kuriérskej preprave doplňte číslo sledovania zásielky.
 
-Po aktualizácii uzlov zmeň tiež hlavný `status` v časti `properties` celého JSON súboru:
-```json
-"status": "CLOSED"
-```
+**7. Archivácia výstupov:**
+
+Nahrajte nasledujúce súbory do záložky **Přílohy** projektu:
+- `MANIFEST.json` – zoznam všetkých odovzdaných súborov so SHA-256 súčtami
+- Odovzdávací protokol – naskenovaný podpísaný protokol
 
 ## Výsledek
 
@@ -89,10 +71,6 @@ Záverečný balík pre klienta obsahuje: obnovené fotografie, záverečnú tec
 Dokumentácia: informačný e-mail odoslaný, odovzdávací protokol podpísaný oboma stranami, reťazec úschovy má stav `UZAVRETÝ` bez medzier v zázname.
 
 Archivácia prípadu: všetky súbory archivované s retenčnou lehotou 7 rokov, stav v databáze `UZAVRETÝ`.
-
-Aktualizovaný case JSON súbor s uzlom `caseDelivery`, záverečným záznamom `chainOfCustody` a hodnotou `status: "CLOSED"` — reťazec úschovy je formálne uzavretý.
-
-Fyzické odovzdanie a podpisy: mimo rozsah automatizácie – realizované manuálne analytikom.
 
 ## Reference
 

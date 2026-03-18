@@ -18,13 +18,13 @@ Jednoduchá
 
 ## Popis
 
-Predchádzajúci krok vypočítal source_hash priamo z originálneho média počas imaging procesu. Tento krok vypočíta image_hash zo súboru forenzného obrazu uloženého na disku a porovná obe hodnoty. Zhoda hashov matematicky dokazuje, že súbor obrazu je bit-for-bit identický s dátami prečítanými z originálneho média.
+Predchádzajúci krok vypočítal source_hash priamo z originálneho média počas imaging procesu. Tento krok vypočíta image_hash zo súboru forenzného obrazu a porovná obe hodnoty. Zhoda hashov matematicky dokazuje, že súbor obrazu je bit-for-bit identický s dátami prečítanými z originálneho média.
 
 ## Jak na to
 
 **1. Spustenie verifikácie:**
 
-Skript automaticky načíta source_hash zo súboru `PHOTORECOVERY-2025-01-26-001_imaging.json` a vypočíta SHA-256 hash forenzného obrazu:
+Skript automaticky načíta source_hash z uzla `imagingResult` (Krok 5) a vypočíta SHA-256 hash forenzného obrazu:
 
 ```bash
 ptimageverification PHOTORECOVERY-2025-01-26-001
@@ -34,50 +34,27 @@ ptimageverification PHOTORECOVERY-2025-01-26-001
 
 Skript automaticky porovná source_hash a image_hash:
 - **MATCH** – hashe sa zhodujú vo všetkých 64 znakoch → integrita potvrdená → workflow pokračuje nasledujúcim krokom
-- **MISMATCH** – hashe sa nezhodujú → kritická chyba → predchádzajúci krok vytvorenia obrazu musí byť zopakovaný, s obrazom sa nesmie ďalej pracovať
+- **MISMATCH** – hashe sa nezhodujú → kritická chyba → Krok 5 musí byť zopakovaný, s obrazom sa nesmie ďalej pracovať
 
-**3. Aktualizácia case JSON:**
+**3. Výsledky v uzle hashVerification:**
 
-Otvorte súbor `PHOTORECOVERY-2025-01-26-001.json` a pridajte uzol `hashVerification` a nový záznam `chainOfCustody` do poľa `nodes`:
-
-```json
-{
-  "type": "hashVerification",
-  "properties": {
-    "algorithm": "SHA-256",
-    "sourceHash": "a3f5...c9d1",
-    "imageHash": "a3f5...c9d1",
-    "hashMatch": true,
-    "imagePath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd",
-    "imageSizeBytes": 31914983424,
-    "calculationTimeSeconds": 312,
-    "verificationStatus": "VERIFIED",
-    "completedAt": "2025-01-26T14:15:00Z"
-  }
-},
-{
-  "type": "chainOfCustody",
-  "properties": {
-    "step": "step06-verifikacia-hashu",
-    "action": "Hash verification completed – SHA-256 MATCH, image integrity confirmed",
-    "analyst": "Dominik Sabota",
-    "timestamp": "2025-01-26T14:15:00Z",
-    "notes": null
-  }
-}
-```
-
-Pri MISMATCH nastavte `"hashMatch": false`, `"verificationStatus": "MISMATCH"` a zaznamenajte dôvod do `notes` v CoC zázname.
+Skript automaticky zapíše výsledky do uzla `hashVerification` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+- Algoritmus – SHA-256
+- Zdrojový hash – prevzatý z uzla `imagingResult`
+- Hash obrazu – vypočítaný z forenzného obrazu
+- Zhoda hashov – MATCH / MISMATCH
+- Stav verifikácie – VERIFIED / MISMATCH
+- Čas výpočtu (sekundy)
 
 **4. Archivácia výstupov:**
 
-Archivujte do Case dokumentácie:
-- `PHOTORECOVERY-2025-01-26-001_verification.json` – výsledok verifikácie s oboma hashmi (generuje skript)
-- `PHOTORECOVERY-2025-01-26-001_image.sha256` – image_hash v štandardnom formáte (generuje skript)
+Skript automaticky nahrá nasledujúce súbory do záložky **Přílohy** projektu:
+- `PHOTORECOVERY-2025-01-26-001_verification.json` – výsledok verifikácie s oboma hashmi
+- `PHOTORECOVERY-2025-01-26-001_image.sha256` – image_hash v štandardnom formáte
 
 ## Výsledek
 
-SHA-256 image_hash vypočítaný a porovnaný so source_hash. Aktualizovaný case JSON súbor s uzlom `hashVerification` a ďalším záznamom `chainOfCustody`. Pri MATCH originálne médium môže byť bezpečne odpojené a workflow pokračuje nasledujúcim krokom. Pri MISMATCH analýza zastavená a predchádzajúci krok sa opakuje.
+SHA-256 image_hash vypočítaný a porovnaný so source_hash. Výsledok zaznamenaný v uzle `hashVerification`. Pri MATCH workflow pokračuje nasledujúcim krokom. Pri MISMATCH analýza zastavená a Krok 5 sa opakuje.
 
 ## Reference
 
@@ -93,4 +70,3 @@ K otestovaniu
 ## Nález
 
 (prázdne – vyplní sa po teste)
-

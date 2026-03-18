@@ -28,7 +28,7 @@ Skript spustí PhotoRec na forenznom obraze a vykoná validáciu, deduplikáciu 
 ptfilecarving PHOTORECOVERY-2025-01-26-001
 ```
 
-Skript načíta súbor `PHOTORECOVERY-2025-01-26-001_filesystem_analysis.json` z predošlého kroku a overí odporúčanú metódu. Pri `filesystem_scan` odmietne pokračovať – analytik musí spustiť krok Filesystem Recovery. Pri `hybrid` pokračuje normálne.
+Skript načíta stratégiu obnovy z uzla `filesystemAnalysis` (Krok 7) a overí odporúčanú metódu. Pri `filesystem_scan` odmietne pokračovať – analytik musí spustiť krok Filesystem Recovery. Pri `hybrid` pokračuje normálne.
 
 **2. Overenie nástrojov:**
 
@@ -46,44 +46,28 @@ Pre každý carved súbor skript overí minimálnu veľkosť (100 B), typ cez `f
 
 Pre každý unikátny súbor skript extrahuje EXIF metadáta a uloží ich do `metadata/`. Súbory sú presunuté do podadresárov podľa formátu (`jpg/`, `png/`, `tiff/`, `raw/`, `other/`) a premenované na `PHOTORECOVERY-2025-01-26-001_{typ}_{seq:06d}.ext`.
 
-**6. Aktualizácia case JSON:**
+**6. Výsledky v uzle fileCarvingRecovery:**
 
-Otvorte súbor `PHOTORECOVERY-2025-01-26-001.json` a pridajte uzol `fileCarvingRecovery` a nový záznam `chainOfCustody` do poľa `nodes`:
+Skript automaticky zapíše výsledky do uzla `fileCarvingRecovery` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+- Metóda obnovy – file_carving / hybrid
+- Celkový počet carved súborov
+- Počet validných obrazových súborov
+- Počet poškodených súborov
+- Počet duplikátov
+- Počet súborov v karanténe
+- Miera validácie (%)
+- Miera duplikácie (%)
+- Extrakcia metadát – áno / nie
 
-```json
-{
-  "type": "fileCarvingRecovery",
-  "properties": {
-    "recoveryMethod": "file_carving",
-    "imagePath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd",
-    "outputDirectory": "/var/forensics/recovered/PHOTORECOVERY-2025-01-26-001_carved",
-    "carvedTotal": 520,
-    "validImages": 298,
-    "corrupted": 41,
-    "duplicates": 138,
-    "quarantine": 43,
-    "validationRate": 57.3,
-    "duplicationRate": 26.5,
-    "metadataExtracted": true,
-    "reportPath": "/var/forensics/recovered/PHOTORECOVERY-2025-01-26-001_carving_report.json",
-    "completedAt": "2025-01-26T20:15:00Z"
-  }
-},
-{
-  "type": "chainOfCustody",
-  "properties": {
-    "step": "step08b-file-carving",
-    "action": "File carving completed – 298 valid images recovered, 138 duplicates removed",
-    "analyst": "Jan Novotny",
-    "timestamp": "2025-01-26T20:15:00Z",
-    "notes": null
-  }
-}
-```
+**7. Archivácia výstupov:**
+
+Skript automaticky nahrá nasledujúce súbory do záložky **Přílohy** projektu:
+- `PHOTORECOVERY-2025-01-26-001_carving_report.json` – kompletný report obnovy
+- `CARVING_REPORT.txt` – textový katalóg súborov a štatistiky
 
 ## Výsledek
 
-Obnovené súbory organizované podľa formátu v `PHOTORECOVERY-2025-01-26-001_carved/organized/` (`jpg/`, `png/`, `tiff/`, `raw/`, `other/`), poškodené v `corrupted/`, duplikáty v `duplicates/`. Zachované: EXIF metadáta a obsah fotografií. Stratené: pôvodné názvy súborov, adresárová štruktúra a FS timestamps. Úspešnosť validácie typicky 50–65 %, 20–30 % duplikátov. JSON report `PHOTORECOVERY-2025-01-26-001_carving_report.json` a textový `CARVING_REPORT.txt` obsahujú štatistiky a katalóg súborov. Aktualizovaný case JSON súbor s uzlom `fileCarvingRecovery` a ďalším záznamom `chainOfCustody`. Workflow pokračuje do kroku Katalogizácia fotografií.
+Obnovené súbory organizované podľa formátu v `PHOTORECOVERY-2025-01-26-001_carved/organized/` (`jpg/`, `png/`, `tiff/`, `raw/`, `other/`), poškodené v `corrupted/`, duplikáty v `duplicates/`. Zachované: EXIF metadáta a obsah fotografií. Stratené: pôvodné názvy súborov, adresárová štruktúra a FS timestamps. Výsledky zaznamenané v uzle `fileCarvingRecovery`. Workflow pokračuje do kroku Katalogizácia fotografií.
 
 ## Reference
 
