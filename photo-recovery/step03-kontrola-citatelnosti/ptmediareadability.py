@@ -19,7 +19,7 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Dict, List, Any
 
-from ._version import __version__
+from _version import __version__
 from ptlibs import ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
@@ -62,7 +62,7 @@ class PtMediaReadability:
         """Write-blocker confirmation"""
         ptprint("\n" + "!" * 70, "WARNING", condition=True)
         ptprint("CRITICAL: WRITE-BLOCKER MUST BE CONNECTED", "WARNING",
-               condition=True, colortext=True)
+            condition=True, colortext=True)
         ptprint("!" * 70, "WARNING", condition=True)
         ptprint("\nVerify before proceeding:", "TEXT", condition=True)
         ptprint("  1. Hardware write-blocker is physically connected", "TEXT", condition=True)
@@ -70,10 +70,21 @@ class PtMediaReadability:
         ptprint("  3. No unusual sounds from HDD", "TEXT", condition=True)
         ptprint("  4. Media connected THROUGH write-blocker, not directly", "TEXT", condition=True)
         
-        ok = input("\nConfirm write-blocker is active [yes/NO]: ").strip().lower() in ("yes", "y")
+        while True:
+            response = input("\nConfirm write-blocker is active [y/N]: ").strip().lower()
+            
+            if response in ("y", "yes"):
+                ok = True
+                break
+            elif response in ("n", "no", ""):
+                ok = False
+                break
+            else:
+                ptprint("Invalid input. Please enter 'y' or 'n'", "WARNING", condition=True)
+        
         ptprint("\n" + ("✓" * 70 if ok else "✗" * 70), "OK" if ok else "ERROR", condition=True)
         ptprint("CONFIRMED - proceeding" if ok else "NOT CONFIRMED - test ABORTED",
-               "OK" if ok else "ERROR", condition=True, colortext=True)
+            "OK" if ok else "ERROR", condition=True, colortext=True)
         ptprint(("✓" * 70 if ok else "✗" * 70), "OK" if ok else "ERROR", condition=True)
         return ok
 
