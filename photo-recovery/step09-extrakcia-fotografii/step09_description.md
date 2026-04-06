@@ -18,71 +18,102 @@ Jednoduchá
 
 ## Popis
 
-Skript zjednotí výstupy z krokov obnovy do jedného organizovaného datasetu pomocou SHA-256 deduplikácie naprieč zdrojmi a vytvorí master katalóg so štatistikami. Krok sa vykonáva vždy — pri `filesystem_scan` spracuje jeden zdroj, pri `hybrid` oba.
+Tento krok zjednotí výstupy z krokov obnovy (Krok 8a a/alebo 8b) do jedného organizovaného datasetu pomocou SHA-256 deduplikácie naprieč zdrojmi a vytvorí master katalóg so štatistikami. Vykonáva sa vždy – pri `filesystem_scan` spracuje jeden zdroj, pri `hybrid` oba.
 
 ## Jak na to
 
-**1. Spustenie skriptu:**
+**1. Overenie dostupných zdrojov:**
+
+Skontrolujte, ktoré výstupy z predchádzajúcich krokov existujú podľa stratégie z Kroku 7:
+- `filesystem_scan` → adresár `_recovered/` (Krok 8a)
+- `file_carving` → adresár `_carved/` (Krok 8b)
+- `hybrid` → oba adresáre
+
+Ak žiadny zdroj neexistuje, nekračujte – skontrolujte Kroky 8a/8b.
+
+**2. Nastavenie premenných:**
 
 ```bash
-ptrecoveryconsolidation PHOTORECOVERY-2025-01-26-001
+CASE_ID="PHOTORECOVERY-2025-01-26-001"
+BASE="/forenzne/pripady/${CASE_ID}"
+CONSOL="${BASE}/${CASE_ID}_consolidated"
+mkdir -p "${CONSOL}/fs_based/jpg" "${CONSOL}/fs_based/png" "${CONSOL}/fs_based/tiff" \
+         "${CONSOL}/fs_based/raw" "${CONSOL}/fs_based/other" \
+         "${CONSOL}/carved/jpg"   "${CONSOL}/carved/png"    "${CONSOL}/carved/tiff" \
+         "${CONSOL}/carved/raw"   "${CONSOL}/carved/other" \
+         "${CONSOL}/duplicates"
 ```
 
-Skript overí existenciu výstupov z uzlov `filesystemRecovery` (Krok 8a) a `fileCarvingRecovery` (Krok 8b). Ak žiadny zdroj neexistuje, odmietne pokračovať.
+**3. SHA-256 hashovanie všetkých zdrojov:**
 
-**2. Inventarizácia:**
-
-Pre každý dostupný zdroj skript rekurzívne naskenuje obrazové súbory (`.jpg`, `.png`, `.raw` a ďalšie) a zaznamenáva cestu, veľkosť, príponu a zdroj (`fs_based` / `carved`).
-
-**3. SHA-256 hashovanie a deduplikácia:**
-
-Pre každý súbor sa vypočíta SHA-256 odtlačok. Ak rovnaký hash existuje v oboch zdrojoch, FS-based kópia zostane a carved kópia sa skopíruje do `duplicates/` pre auditný zámer. Typicky 15–25 % súborov pri hybridnom prístupe sú duplikáty.
-
-**4. Kopírovanie a organizácia:**
-
-Unikátne súbory sa skopírujú do `PHOTORECOVERY-2025-01-26-001_consolidated/`. Adresárová štruktúra je dvojúrovňová – súbory sa triedia najprv podľa zdroja, potom podľa formátu:
-
-```
-PHOTORECOVERY-2025-01-26-001_consolidated/
-├── fs_based/
-│   ├── jpg/
-│   ├── png/
-│   ├── tiff/
-│   ├── raw/
-│   └── other/
-├── carved/
-│   ├── jpg/
-│   ├── png/
-│   ├── tiff/
-│   ├── raw/
-│   └── other/
-└── duplicates/
+```bash
+find "${BASE}/${CASE_ID}_recovered" -type f | xargs sha256sum > /tmp/hashes_fs.txt
+find "${BASE}/${CASE_ID}_carved/organized" -type f | xargs sha256sum > /tmp/hashes_carved.txt
 ```
 
-FS-based súbory zachovávajú pôvodný názov (s kolíznou ochranou), carved súbory dostanú systematický názov `PHOTORECOVERY-2025-01-26-001_{typ}_{seq:06d}.ext`.
+**4. Deduplikácia naprieč zdrojmi:**
 
-**5. Master katalóg:**
+Zlúčte hashes a identifikujte duplicitné hodnoty:
+```bash
+cat /tmp/hashes_fs.txt /tmp/hashes_carved.txt | sort > /tmp/hashes_all.txt
+```
+Ak rovnaký hash existuje v oboch zdrojoch, FS-based kópia má prednosť – skopírujte ju do `fs_based/[format]/`, carved kópiu presuňte do `duplicates/`. Typicky 15–25 % súborov pri hybridnom prístupe sú duplikáty.
 
-Skript uloží `master_catalog.json` s kompletným inventárom (ID, názov, hash, veľkosť, formát, zdroj, cesta) a štatistikami. Textový report `CONSOLIDATION_REPORT.txt` obsahuje prehľad pre klienta.
+**5. Kopírovanie a organizácia:**
 
-**6. Výsledky v uzle recoveryConsolidation:**
+Unikátne súbory skopírujte do konsolidovaného adresára podľa zdroja a formátu:
+- FS-based → `${CONSOL}/fs_based/[jpg|png|tiff|raw|other]/` – zachovajte pôvodný názov (pri kolízii pridajte číselný suffix)
+- Carved → `${CONSOL}/carved/[jpg|png|tiff|raw|other]/` – použite systematický názov `${CASE_ID}_{typ}_{seq:06d}.ext`
 
-Skript automaticky zapíše výsledky do uzla `recoveryConsolidation` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+**6. Vytvorenie master katalógu:**
+
+Vytvorte súbor `master_catalog.json` s inventárom každého súboru:
+```json
+[
+  {
+    "id": 1,
+    "filename": "IMG_1234.jpg",
+    "hash_sha256": "abc123...",
+    "size_bytes": 2048576,
+    "format": "jpg",
+    "source": "fs_based",
+    "path": "fs_based/jpg/IMG_1234.jpg"
+  }
+]
+```
+Vytvorte aj textový report `CONSOLIDATION_REPORT.txt` s prehľadom štatistík.
+
+**7. Zápis výsledkov a aktualizácia CoC:**
+
+Zapíšte výsledky do uzla `recoveryConsolidation` v dokumentácii prípadu:
 - Počet súborov z filesystem recovery
 - Počet súborov z file carving
 - Počet odstránených duplikátov
 - Počet finálnych unikátnych súborov
 - Celková veľkosť datasetu (bajty)
 
-**7. Archivácia výstupov:**
+Pridajte záznam do poľa `chainOfCustody`:
+```json
+{
+  "timestamp": "2025-01-26T15:30:00Z",
+  "analyst": "Meno Analytika",
+  "action": "Konsolidácia dokončená – N unikátnych súborov, M duplikátov odstránených"
+}
+```
 
-Skript automaticky nahrá nasledujúce súbory do záložky **Přílohy** projektu:
+**8. Archivácia výstupov:**
+
+Archivujte do dokumentácie prípadu:
 - `master_catalog.json` – kompletný inventár všetkých súborov
 - `CONSOLIDATION_REPORT.txt` – textový prehľad pre klienta
 
+---
+
+> **Automatizácia (pripravuje sa):** Skript `ptrecoveryconsolidation` bude celý proces deduplikácie, organizácie, zápis uzla `recoveryConsolidation` a aktualizáciu CoC vykonávať automaticky.
+
 ## Výsledek
 
-Konsolidovaný dataset v `PHOTORECOVERY-2025-01-26-001_consolidated/`: podadresáre `fs_based/{jpg,png,tiff,raw,other}/` a `carved/{jpg,png,tiff,raw,other}/` organizované podľa zdroja aj formátu, `duplicates/` pre auditné kópie. Výsledky zaznamenané v uzle `recoveryConsolidation`. Workflow pokračuje do kroku Validácia integrity fotografií.
+Konsolidovaný dataset v `${CASE_ID}_consolidated/`: podadresáre `fs_based/{jpg,png,tiff,raw,other}/` a `carved/{jpg,png,tiff,raw,other}/`, `duplicates/` pre auditné kópie. Výsledky zaznamenané v uzle `recoveryConsolidation`. Workflow pokračuje do Kroku 10 (Validácia integrity).
 
 ## Reference
 

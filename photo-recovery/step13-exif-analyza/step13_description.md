@@ -22,54 +22,97 @@ Skript načíta validné súbory z uzla `integrityValidation` (Krok 10) a volite
 
 ## Jak na to
 
-**1. Spustenie skriptu:**
+**1. Príprava vstupného zoznamu:**
+
+Z uzla `integrityValidation` (Krok 10) získajte zoznam validných súborov (adresár `_validation/valid/`). Ak existuje uzol `photoRepair` (Krok 12), doplňte zoznam o súbory z `_repair/repaired/`. Poškodené a neopraviteľné súbory nezahrňujte.
 
 ```bash
-ptexifanalysis PHOTORECOVERY-2025-01-26-001
+CASE_ID="PHOTORECOVERY-2025-01-26-001"
+BASE="/forenzne/pripady/${CASE_ID}"
+EXIF_DIR="${BASE}/${CASE_ID}_exif"
+mkdir -p "${EXIF_DIR}/metadata"
 ```
-
-Skript načíta zoznam validných súborov z uzla `integrityValidation` (Krok 10) a voliteľne zoznam úspešne opravených súborov z uzla `photoRepair` (Krok 12). Ak uzol `photoRepair` neexistuje alebo stratégia bola `skip_repair`, skript zaloguje varovanie a pokračuje len s validnými súbormi.
 
 **2. Dávková extrakcia EXIF:**
 
-Pre každú dávku 50 súborov skript spustí `exiftool -j -G -a -s -n`. Súbory s aspoň jedným zmysluplným poľom (DateTimeOriginal, Make, ISO, GPS, Software) sa považujú za EXIF-pozitívne.
+```bash
+exiftool -j -G -a -s -n \
+    "${BASE}/${CASE_ID}_validation/valid/" \
+    "${BASE}/${CASE_ID}_repair/repaired/" \
+    > "${EXIF_DIR}/${CASE_ID}_exif_database.json"
+```
+Ak adresár `_repair/repaired/` neexistuje, príkaz ho jednoducho preskočí.
+
+Pre CSV export:
+```bash
+exiftool -csv -G -a \
+    "${BASE}/${CASE_ID}_validation/valid/" \
+    > "${EXIF_DIR}/${CASE_ID}_exif_data.csv"
+```
+
+Súbory s aspoň jedným zmysluplným poľom (DateTimeOriginal, Make, ISO, GPS, Software) považujte za EXIF-pozitívne.
 
 **3. Analýza času a zariadení:**
 
-Skript parsuje `DateTimeOriginal`, buduje časovú os (fotky zoskupené podľa dátumu) a identifikuje unikátne zariadenia podľa polí `Make` a `Model` (výrobca a model fotoaparátu alebo telefónu).
+Z `_exif_database.json` pre každý záznam skontrolujte:
+- `DateTimeOriginal` – zostavte časovú os (zoskupte fotky podľa dátumu)
+- `Make` a `Model` – zaznamenajte zoznam unikátnych zariadení
 
-**4. GPS a nastavenia:**
+**4. GPS a technické nastavenia:**
 
-Pre každý záznam skript extrahuje GPS súradnice a číselné hodnoty ISO, FNumber a FocalLength pre štatistiku (min/max/avg).
+Pre každý záznam skontrolujte:
+- `GPSLatitude` a `GPSLongitude` → zaznamenajte zoznam GPS súradníc
+- `ISO`, `FNumber`, `FocalLength` → zaznamenajte min/max/priemerné hodnoty
 
 **5. Detekcia úprav a anomálií:**
 
-Každá fotografia môže mať v EXIF poli `Software` informáciu o programe, ktorý ju spracoval (napr. `"Adobe Photoshop"`, `"Instagram"`). Skript porovná túto hodnotu so zoznamom známeho editačného softvéru a označí súbor ako upravený.
+**Editačný softvér** – pole `Software`:
+Ak obsahuje hodnoty ako `Adobe Photoshop`, `Lightroom`, `GIMP`, `Instagram`, `Snapseed` a podobne, označte súbor ako upravený.
 
-Paralelne sa vykonávajú tri kontroly anomálií: ak je `DateTimeOriginal` v budúcnosti, pravdepodobne ide o poškodené EXIF alebo manipuláciu s metadátami. Ak je ISO vyššie ako 25 600, hodnota je pre bežné zariadenia neobvyklá. Ak je `ModifyDate` novší ako `DateTimeOriginal` a pritom chýba `Software` tag, súbor mohol byť potichu upravený bez zanechania stopy v metadátach.
+**Anomálie – skontrolujte manuálne:**
+- `DateTimeOriginal` v budúcnosti → pravdepodobne poškodené EXIF alebo manipulácia
+- `ISO` > 25 600 → hodnota neobvyklá pre bežné zariadenia
+- `ModifyDate` novší ako `DateTimeOriginal` a zároveň chýba `Software` tag → možná tichá úprava
 
-**6. Výsledky v uzle exifAnalysis:**
+**6. Zápis výsledkov a aktualizácia CoC:**
 
-Skript automaticky zapíše výsledky do uzla `exifAnalysis` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+Zapíšte výsledky do uzla `exifAnalysis` v dokumentácii prípadu:
 - Celkový počet spracovaných súborov
 - Počet EXIF-pozitívnych súborov
-- Počet súborov s DateTimeOriginal
-- Počet súborov s GPS
+- Počet súborov s `DateTimeOriginal`
+- Počet súborov s GPS súradnicami
 - Počet unikátnych zariadení
-- Počet upravených fotografií (Software tag)
+- Počet upravených fotografií (Software tag prítomný)
 - Počet detekovaných anomálií
-- EXIF quality score – excellent (>90 % DateTimeOriginal) / good (70–90 %) / fair (50–70 %) / poor (<50 %)
+- EXIF quality score:
+  - excellent – > 90 % súborov má `DateTimeOriginal`
+  - good – 70–90 %
+  - fair – 50–70 %
+  - poor – < 50 %
+
+Pridajte záznam do poľa `chainOfCustody`:
+```json
+{
+  "timestamp": "2025-01-26T17:30:00Z",
+  "analyst": "Meno Analytika",
+  "action": "EXIF analýza dokončená – N EXIF-pozitívnych súborov, EXIF quality: good"
+}
+```
 
 **7. Archivácia výstupov:**
 
-Skript automaticky nahrá nasledujúce súbory do záložky **Přílohy** projektu:
-- `PHOTORECOVERY-2025-01-26-001_exif_database.json` – kompletná EXIF databáza
-- `PHOTORECOVERY-2025-01-26-001_exif_data.csv` – Excel-kompatibilný export
-- `PHOTORECOVERY-2025-01-26-001_EXIF_REPORT.txt` – textový report pre klienta
+Archivujte do dokumentácie prípadu:
+- `${CASE_ID}_exif_database.json` – kompletná EXIF databáza
+- `${CASE_ID}_exif_data.csv` – Excel-kompatibilný export
+- `${CASE_ID}_EXIF_REPORT.txt` – textový súhrn pre klienta (časová os, zariadenia, anomálie)
+
+---
+
+> **Automatizácia (pripravuje sa):** Skript `ptexifanalysis` bude dávkovú extrakciu, analýzu, zápis uzla `exifAnalysis` a aktualizáciu CoC vykonávať automaticky.
 
 ## Výsledek
 
-Kompletná EXIF databáza s per-file metadátami, časovou osou a GPS zoznamom. CSV export pre ďalšie spracovanie. Výsledky zaznamenané v uzle `exifAnalysis`. Workflow pokračuje do kroku Finálny report.
+Kompletná EXIF databáza s per-file metadátami, časovou osou a GPS zoznamom. CSV export pre ďalšie spracovanie. Výsledky zaznamenané v uzle `exifAnalysis`. Workflow pokračuje do Kroku 14 (Záverečná správa).
 
 ## Reference
 

@@ -2,7 +2,7 @@
 
 ## Úkol
 
-Vytvoriť forenzný obraz média a automaticky vypočítať SHA-256 hash počas procesu imaging.
+Vytvoriť forenzný obraz média a vypočítať SHA-256 hash počas procesu imaging.
 
 ## Obtiažnosť
 
@@ -20,7 +20,7 @@ Poloautomatický (vyžaduje potvrdenie write-blockera pred spustením)
 
 Forenzný imaging je proces vytvárania presnej bitovej kópie úložného média. Na rozdiel od bežného kopírovania súborov, forenzný obraz zachytáva absolútne všetko – aktívne súbory, vymazané súbory, slack space, nealokovaný priestor a metadata súborového systému, pričom je bit-for-bit identický s originálom.
 
-SHA-256 hash sa vypočítava súčasne s kopírovaním dát v jednom priechode – eliminuje potrebu opätovného čítania média a poskytuje matematický dôkaz integrity. Výber nástroja je automatický: skript načíta výsledok testu čítateľnosti z uzla `readabilityTest` a podľa klasifikácie média zvolí dc3dd (READABLE) alebo ddrescue (PARTIAL).
+SHA-256 hash sa vypočítava súčasne s kopírovaním dát v jednom priechode – eliminuje potrebu opätovného čítania média a poskytuje matematický dôkaz integrity. Výber nástroja vychádza z výsledku Kroku 3: `dc3dd` pre READABLE médium, `ddrescue` pre PARTIAL médium.
 
 Originálne médium zostáva po celý čas pripojené výhradne cez write-blocker. Všetky budúce analýzy sa vykonávajú na vytvorenej kópii, čím je zabezpečená súdna prípustnosť dôkazu.
 
@@ -30,61 +30,97 @@ Originálne médium zostáva po celý čas pripojené výhradne cez write-blocke
 
 Pred spustením imagingu overte fyzický stav write-blockera – LED indikátor musí svietiť (PROTECTED) a médium musí byť zapojené výlučne cez write-blocker.
 
-⚠️ Systém vyžiada explicitné potvrdenie pred pokračovaním. Ak podmienka nie je splnená, nepokračujte.
+⚠️ Ak podmienka nie je splnená, nepokračujte. Riziko poškodenia dôkazu.
 
 **2. Kontrola dostupného miesta:**
 
-Uistite sa, že cieľové úložisko má dostatok miesta – minimálne 110% kapacity zdrojového média (rezerva pre metadata, logy a mapfile). Systém toto overí automaticky.
-
-**3. Spustenie imagingu:**
-
-Skript automaticky načíta `devicePath` a `selectedTool` z uzla `readabilityTest`:
-
+Uistite sa, že cieľové úložisko má dostatok voľného miesta – minimálne 110 % kapacity zdrojového média:
 ```bash
-ptforensicimaging PHOTORECOVERY-2025-01-26-001
+df -h /cesta/k/cielovemu/uloziku
+lsblk -d -o NAME,SIZE /dev/sdX
 ```
 
-Na základe `selectedTool` skript automaticky zvolí:
-- **READABLE → dc3dd** (rýchle, s integrovaným SHA-256 hashovaním):
+**3. Prečítanie výsledkov Kroku 3:**
+
+Z uzla `readabilityTest` v dokumentácii prípadu si zaznamenajte:
+- `devicePath` – cesta k zariadeniu (napr. `/dev/sdb`)
+- `mediaStatus` – READABLE alebo PARTIAL
+- `selectedTool` – `dc3dd` alebo `ddrescue`
+
+**4. Nastavenie premenných a spustenie imagingu:**
+
 ```bash
-dc3dd if=/dev/sdX of=PHOTORECOVERY-2025-01-26-001.dd hash=sha256 log=imaging.log bs=1M progress=on
+CASE_ID="PHOTORECOVERY-2025-01-26-001"
+SOURCE="/dev/sdX"
+OUTPUT_DIR="/forenzne/pripady/${CASE_ID}"
+mkdir -p "${OUTPUT_DIR}"
 ```
 
-- **PARTIAL → ddrescue** (recovery režim s mapovaním chybných sektorov; SHA-256 sa vypočíta samostatne po dokončení cez bezpečné Popen reťazenie bez shell=True):
+**Pre READABLE médium – dc3dd** (rýchle, s integrovaným SHA-256 hashovaním):
 ```bash
-ddrescue -f -v /dev/sdX PHOTORECOVERY-2025-01-26-001.dd PHOTORECOVERY-2025-01-26-001.mapfile
+dc3dd if=${SOURCE} \
+      of=${OUTPUT_DIR}/${CASE_ID}.dd \
+      hash=sha256 \
+      log=${OUTPUT_DIR}/${CASE_ID}_imaging.log \
+      bs=1M \
+      progress=on
 ```
 
-**4. Zaznamenanie source_hash:**
+**Pre PARTIAL médium – ddrescue** (recovery režim s mapovaním chybných sektorov):
+```bash
+ddrescue -f -v \
+    ${SOURCE} \
+    ${OUTPUT_DIR}/${CASE_ID}.dd \
+    ${OUTPUT_DIR}/${CASE_ID}.mapfile
+```
+Po dokončení ddrescue vypočítajte SHA-256 hash samostatne:
+```bash
+sha256sum ${OUTPUT_DIR}/${CASE_ID}.dd | tee ${OUTPUT_DIR}/${CASE_ID}.dd.sha256
+```
 
-Po dokončení dc3dd automaticky vypíše SHA-256 hash do konzoly aj do log súboru. Tento hash je source_hash – referenčná hodnota pre následnú verifikáciu. Zaznamenajte ho presne (64 hexadecimálnych znakov).
+**5. Zaznamenanie source_hash:**
 
-Kanonický hash súbor `PHOTORECOVERY-2025-01-26-001.dd.sha256` sa vytvorí automaticky vo formáte kompatibilnom s `sha256sum -c`. Následujúci krok načíta source_hash z uzla `imagingResult` (pole Zdrojový hash), nie priamo z hash súboru.
+Po dokončení dc3dd automaticky vypíše SHA-256 hash do konzoly aj do log súboru. Pre ddrescue hash prevezmite z výstupu sha256sum. Zaznamenajte hash (64 hexadecimálnych znakov) – toto je `source_hash`, referenčná hodnota pre všetky náslebné verifikácie.
 
-**5. Výsledky v uzle imagingResult:**
+Kanonický hash súbor `${CASE_ID}.dd.sha256` uložte v cieľovom adresári vo formáte kompatibilnom s `sha256sum -c`.
 
-Skript automaticky zapíše výsledky do uzla `imagingResult` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+**6. Zápis výsledkov a aktualizácia CoC:**
+
+Zapíšte výsledky do uzla `imagingResult` v dokumentácii prípadu:
 - Nástroj – dc3dd / ddrescue
 - Stav média – READABLE / PARTIAL
 - Cesta k obrazu
-- Formát obrazu
+- Formát obrazu – `.dd`
 - Veľkosť zdroja (bajty)
-- Zdrojový hash (SHA-256, 64 znakov)
+- Zdrojový hash – SHA-256, 64 znakov (`source_hash`)
 - Trvanie (sekundy)
 - Priemerná rýchlosť (MB/s)
 - Počet chybných sektorov
 - Pre ddrescue: cesta k mapfile
 
-**6. Archivácia výstupov:**
+Pridajte záznam do poľa `chainOfCustody`:
+```json
+{
+  "timestamp": "2025-01-26T12:00:00Z",
+  "analyst": "Meno Analytika",
+  "action": "Forenzný imaging dokončený – dc3dd, SHA-256: abc123..."
+}
+```
 
-Skript automaticky nahrá nasledujúce súbory do záložky **Přílohy** projektu:
-- `PHOTORECOVERY-2025-01-26-001_imaging.log` – detailný log procesu
-- `PHOTORECOVERY-2025-01-26-001.dd.sha256` – hash vo formáte `sha256sum -c` (ľudsky čitateľná záloha hash hodnoty)
-- `PHOTORECOVERY-2025-01-26-001.mapfile` – len pre ddrescue, mapa chybných sektorov
+**7. Archivácia výstupov:**
+
+Archivujte do dokumentácie prípadu:
+- `${CASE_ID}_imaging.log` – detailný log procesu
+- `${CASE_ID}.dd.sha256` – hash vo formáte `sha256sum -c`
+- `${CASE_ID}.mapfile` – len pre ddrescue
+
+---
+
+> **Automatizácia (pripravuje sa):** Skript `ptforensicimaging` bude výber nástroja, spustenie imagingu, zápis uzla `imagingResult` a aktualizáciu CoC vykonávať automaticky.
 
 ## Výsledek
 
-Forenzný obraz vytvorený vo formáte `.dd`. SHA-256 source_hash vypočítaný a zaznamenaný v uzle `imagingResult`. Kanonický hash súbor vytvorený pre archiváciu. Imaging log obsahuje kompletné detaily – nástroj, trvanie, priemernú rýchlosť, počet chybných sektorov a source_hash. Originálne médium zostáva neporušené a pripojené pre následnú verifikáciu.
+Forenzný obraz vytvorený vo formáte `.dd`. SHA-256 `source_hash` vypočítaný a zaznamenaný v uzle `imagingResult`. Kanonický hash súbor vytvorený pre archiváciu a následnú verifikáciu. Originálne médium zostáva neporušené.
 
 ## Reference
 

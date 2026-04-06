@@ -18,53 +18,118 @@ Jednoduchá
 
 ## Popis
 
-Skript načíta master katalóg z uzla `recoveryConsolidation` (Krok 9) a pre každý súbor vykoná validáciu pomocou dostupných nástrojov. Výsledkom je klasifikácia fotografií do troch kategórií s integrity score a reportom poškodených súborov.
+Tento krok overuje, či sú obnovené súbory skutočne čitateľné a nepoškodené. Pre každý súbor z konsolidovaného datasetu (Krok 9) sa vykoná viacúrovňová validácia a výsledok sa klasifikuje ako valid, corrupted alebo unrecoverable. Tento výsledok priamo určuje, či je potrebná oprava v Kroku 12.
 
 ## Jak na to
 
-**1. Spustenie skriptu:**
+**1. Príprava a kontrola nástrojov:**
 
+PIL/Pillow je povinný:
 ```bash
-ptintegrityvalidation PHOTORECOVERY-2025-01-26-001
+pip install Pillow
+```
+Voliteľné nástroje (skript ich využije ak sú dostupné):
+```bash
+sudo apt-get install libjpeg-progs pngcheck
 ```
 
-Skript načíta `master_catalog.json` z uzla `recoveryConsolidation` (Krok 9) a získa zoznam všetkých konsolidovaných súborov na validáciu.
+Nastavte premenné:
+```bash
+CASE_ID="PHOTORECOVERY-2025-01-26-001"
+CONSOL="/forenzne/pripady/${CASE_ID}/${CASE_ID}_consolidated"
+VALID_DIR="/forenzne/pripady/${CASE_ID}/${CASE_ID}_validation"
+mkdir -p "${VALID_DIR}/valid" "${VALID_DIR}/corrupted" "${VALID_DIR}/unrecoverable"
+```
 
-**2. Kontrola nástrojov:**
+**2. Per-file validácia:**
 
-PIL/Pillow je povinný (`pip install Pillow`). Voliteľné: `jpeginfo`, `pngcheck` – skript použije ak sú dostupné.
+Pre každý súbor z master katalógu vykonajte nasledujúce kontroly:
 
-**3. Per-file validácia:**
+**a) Veľkosť súboru** – prázdne súbory sú okamžite neopraviteľné:
+```bash
+[ -s subor ] && echo "OK" || echo "EMPTY – unrecoverable"
+```
 
-Pre každý súbor skript overí: veľkosť (prázdne súbory = neopraviteľné), čitateľnosť pixelov cez PIL `verify()` + `load()`, a pre JPEG/PNG aj `jpeginfo -c` / `pngcheck -v`. Rozhodovacia logika: ak všetky nástroje prešli → validný, ak niektoré prešli a niektoré zlyhali → poškodený (potenciálne opraviteľný), ak všetky zlyhali → neopraviteľný.
+**b) PIL verify + load** (Python):
+```python
+from PIL import Image
+try:
+    img = Image.open("subor")
+    img.verify()
+    img.close()
+    img = Image.open("subor")
+    img.load()
+    print("VALID")
+except Exception as e:
+    print(f"CORRUPTED: {e}")
+```
 
-**4. Organizácia výstupov:**
+**c) Pre JPEG – jpeginfo** (ak je dostupný):
+```bash
+jpeginfo -c subor
+```
 
-Súbory sa skopírujú do `PHOTORECOVERY-2025-01-26-001_validation/valid/`, `corrupted/` alebo `unrecoverable/`. Zdrojové súbory v konsolidovanom adresári zostávajú nedotknuté.
+**d) Pre PNG – pngcheck** (ak je dostupný):
+```bash
+pngcheck -v subor
+```
 
-**5. Analýza poškodení a report:**
+**Rozhodovacia logika:**
+- Všetky dostupné nástroje prešli → `valid/`
+- Niektoré prešli, niektoré zlyhali → `corrupted/` (potenciálne opraviteľný)
+- Všetky zlyhali alebo súbor je prázdny → `unrecoverable/`
 
-Pre každý poškodený súbor skript určí typ chyby (truncated, invalid_header, corrupt_segments, corrupt_data, unknown) a úroveň opraviteľnosti (L1–L5). Ak typ chyby nie je možné určiť, súbor sa klasifikuje ako unknown (L3, vyžaduje manuálnu inšpekciu).
+**3. Klasifikácia typu poškodenia pre corrupted súbory:**
 
-**6. Výsledky v uzle integrityValidation:**
+Pre každý súbor v `corrupted/` zaznamenajte typ a úroveň opraviteľnosti:
 
-Skript automaticky zapíše výsledky do uzla `integrityValidation` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
+| Typ | Úroveň | Popis |
+|-----|--------|-------|
+| truncated | L1 | Skrátený súbor, chýba EOI marker |
+| corrupt_segments | L2 | Poškodené dátové bloky |
+| unknown | L3 | Neurčený typ, manuálna inšpekcia |
+| corrupt_data | L4 | Poškodené pixelové dáta |
+| invalid_header | L5 | Poškodená hlavička – neopraviteľné |
+
+**4. Výpočet Integrity Score:**
+
+```
+Integrity Score = (počet valid súborov / celkový počet súborov) × 100 %
+```
+
+**5. Zápis výsledkov a aktualizácia CoC:**
+
+Zapíšte výsledky do uzla `integrityValidation` v dokumentácii prípadu:
 - Celkový počet validovaných súborov
 - Počet validných súborov
 - Počet poškodených súborov
 - Počet neopraviteľných súborov
-- Integrity score (% validných súborov)
+- Integrity score (%)
 - Použité nástroje
+- Zoznam `filesNeedingRepair` (corrupted súbory L1–L4 s typom poškodenia)
 
-**7. Archivácia výstupov:**
+Pridajte záznam do poľa `chainOfCustody`:
+```json
+{
+  "timestamp": "2025-01-26T16:00:00Z",
+  "analyst": "Meno Analytika",
+  "action": "Validácia integrity dokončená – Integrity Score: 87 %, N poškodených súborov"
+}
+```
 
-Skript automaticky nahrá nasledujúce súbory do záložky **Přílohy** projektu:
-- `PHOTORECOVERY-2025-01-26-001_validation_report.json` – kompletný validačný report
-- `PHOTORECOVERY-2025-01-26-001_VALIDATION_REPORT.txt` – textový prehľad so zoznamom súborov odporúčaných na opravu
+**6. Archivácia výstupov:**
+
+Archivujte do dokumentácie prípadu:
+- `${CASE_ID}_validation_report.json` – kompletný validačný report
+- `${CASE_ID}_VALIDATION_REPORT.txt` – textový prehľad so zoznamom súborov na opravu
+
+---
+
+> **Automatizácia (pripravuje sa):** Skript `ptintegrityvalidation` bude validáciu, klasifikáciu, zápis uzla `integrityValidation` a aktualizáciu CoC vykonávať automaticky.
 
 ## Výsledek
 
-Klasifikácia všetkých fotografií do troch kategórií v `PHOTORECOVERY-2025-01-26-001_validation/`: `valid/`, `corrupted/`, `unrecoverable/`. Integrity score s rozpisom podľa formátu a zdroja (fs_based vs carved). Výsledky zaznamenané v uzle `integrityValidation`. Workflow pokračuje do kroku Rozhodnutie o oprave fotografií.
+Klasifikácia všetkých fotografií do troch kategórií v `${CASE_ID}_validation/`: `valid/`, `corrupted/`, `unrecoverable/`. Integrity score s rozpisom podľa formátu a zdroja. Výsledky zaznamenané v uzle `integrityValidation`. Workflow pokračuje do Kroku 11 (Rozhodnutie o oprave).
 
 ## Reference
 

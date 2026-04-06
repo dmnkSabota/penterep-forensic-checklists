@@ -31,7 +31,7 @@ Vytvorte Case ID podľa formátu `PHOTORECOVERY-YYYY-MM-DD-XXX` a vyplňte ho do
 
 Príklad prvého prípadu dňa 26. januára 2025: `PHOTORECOVERY-2025-01-26-001`
 
-Overte, že prípad s týmto ID ešte neexistuje v archíve.
+Skontrolujte archív existujúcich prípadov a overte, že toto ID ešte nebolo použité.
 
 **2. Údaje klienta:**
 
@@ -43,30 +43,48 @@ Zaznamenajte kontaktné údaje klienta do formulára scenára:
 
 **3. Urgentnosť a SLA:**
 
-Dohodnite s klientom urgentnosť prípadu a vyberte príslušnú možnosť vo formulári:
+Dohodnite s klientom urgentnosť prípadu a zaznamenajte zvolenú možnosť:
 - Štandardná (5–7 pracovných dní)
 - Vysoká (2–3 pracovné dni)
 - Kritická (do 24 hodín)
 
 **4. GDPR súlad:**
 
-Zvoľte právny základ spracovania osobných údajov vo formulári:
-- Pre komerčnú obnovu: "plnenie zmluvy"
-- Pre súdne prípady: "právna povinnosť"
+Zvoľte právny základ spracovania osobných údajov a zaznamenajte ho:
+- Pre komerčnú obnovu: „plnenie zmluvy"
+- Pre súdne prípady: „právna povinnosť"
 
 **5. Príjmový protokol:**
 
-Manuálne vyplňte príjmový protokol (použite pripravený formulár alebo šablónu). Vytlačte ho, nechajte klienta podpísať a naskenovanú verziu archivujte do fyzickej a digitálnej dokumentácie prípadu. Po podpise aktivujte prepínač **Príjmový protokol podpísaný** vo formulári.
+Manuálne vyplňte príjmový protokol (použite pripravený formulár alebo šablónu). Vytlačte ho, nechajte klienta podpísať a naskenovanú verziu archivujte do fyzickej aj digitálnej dokumentácie prípadu. Fyzickú kópiu uložte do zakladača prípadu.
 
-**6. Finalizácia:**
+**6. Inicializácia záznamu prípadu:**
 
-Skontrolujte, že formulár scenára obsahuje správne vyplnené všetky povinné polia. Potvrdzovací email s číslom prípadu a ďalšími krokmi odošlite klientovi manuálne.
+Vytvorte JSON záznam prípadu a uložte ho pod príslušným Case ID. Záznam musí obsahovať stav `INITIATED` a prvý zápis do poľa `chainOfCustody` s časovou pečiatkou, menom analytika a popisom akcie.
 
+Príklad záznamu:
+```json
+{
+  "caseId": "PHOTORECOVERY-2025-01-26-001",
+  "status": "INITIATED",
+  "chainOfCustody": [
+    {
+      "timestamp": "2025-01-26T09:00:00Z",
+      "analyst": "Meno Analytika",
+      "action": "Prijatá žiadosť o obnovu fotografií"
+    }
+  ]
+}
+```
+
+**7. Finalizácia:**
+
+Skontrolujte, že dokumentácia obsahuje všetky povinné polia. Potvrdzovací email s číslom prípadu a ďalšími krokmi odošlite klientovi manuálne.
 
 ## Výsledek
 
 Po dokončení kroku existujú tieto výstupy:
-- Vyplnený uzol prijatia žiadosti so stavom `INITIATED` a prvým `chainOfCustody` záznamom
+- Vyplnený záznam prípadu so stavom `INITIATED` a prvým `chainOfCustody` záznamom
 - Vyplnený a podpísaný príjmový protokol (fyzická kópia + naskenovaná digitálna kópia)
 - Odoslaný potvrdzovací email klientovi
 

@@ -2,7 +2,7 @@
 
 ## Úkol
 
-Je potrebná oprava poškodených fotografií ?
+Je potrebná oprava poškodených fotografií?
 
 ## Obtiažnosť
 
@@ -10,7 +10,7 @@ Jednoduchá
 
 ## Časová náročnosť
 
-1 minúta
+5 minút
 
 ## Automatický test
 
@@ -18,49 +18,83 @@ Jednoduchá
 
 ## Popis
 
-Skript rozhodne, či má zmysel pokúsiť sa o opravu poškodených súborov. Načíta výsledky validácie z uzla `integrityValidation` (Krok 10) a na základe piatich prioritných pravidiel určí stratégiu: `perform_repair` alebo `skip_repair`.
+Skript rozhodne, či má zmysel pokúsiť sa o opravu poškodených súborov. Načíta výsledky validácie z uzla `integrityValidation` (Krok 10) a na základe piatich prioritných pravidiel určí stratégiu: `perform_repair` alebo `skip_repair`. Výsledok je čisto analytický – žiadne súbory sa v tomto kroku nemenia.
 
 ## Jak na to
 
-**1. Spustenie skriptu:**
+**1. Prečítanie výsledkov validácie:**
 
-```bash
-ptrepairdecision PHOTORECOVERY-2025-01-26-001
-```
-
-Skript načíta výsledky z uzla `integrityValidation` (Krok 10) a extrahuje štatistiky: počet validných, poškodených a neopraviteľných súborov, integrity score a zoznam súborov odporúčaných na opravu.
+Z uzla `integrityValidation` (Krok 10) si zapíšte:
+- Počet validných súborov
+- Počet poškodených súborov
+- Počet neopraviteľných súborov
+- Integrity score (%)
+- Zoznam `filesNeedingRepair` s typmi poškodení a úrovňami opraviteľnosti (L1–L5)
 
 **2. Odhad úspešnosti opravy:**
 
-Pre každý opraviteľný súbor skript priradí empirickú mieru úspešnosti podľa typu poškodenia (truncated 85 %, corrupt_segments 60 %, corrupt_data 40 %, fragmented 15 %) a vypočíta priemer naprieč všetkými súbormi.
+Pre každý súbor v `filesNeedingRepair` priraďte empirickú mieru úspešnosti:
+
+| Typ poškodenia | Odhadovaná úspešnosť |
+|----------------|----------------------|
+| truncated | 85 % |
+| corrupt_segments | 60 % |
+| corrupt_data | 40 % |
+| fragmented | 15 % |
+| unknown / invalid_header | 0 % |
+
+Vypočítajte vážený priemer naprieč všetkými opraviteľnými súbormi (L1–L4). Súbory L5 do výpočtu nezahrňujte.
 
 **3. Aplikácia rozhodovacích pravidiel:**
 
-Skript prejde päť pravidiel v poradí a zastaví sa pri prvom, ktoré platí: R1 – žiadne poškodené súbory → preskočiť, R2 – žiadny súbor nie je opraviteľný → preskočiť, R3 – menej ako 50 validných súborov → opraviť (každá ďalšia fotografia má vysokú hodnotu), R4 – odhadovaná úspešnosť ≥ 50 % → opraviť, R5 – inak → preskočiť.
+Prechádzajte pravidlá v poradí a zastavte sa pri prvom, ktoré platí:
+
+| # | Podmienka | Rozhodnutie |
+|---|-----------|-------------|
+| R1 | Žiadne poškodené súbory (corrupted = 0) | `skip_repair` |
+| R2 | Žiadny súbor nie je opraviteľný (všetky L5) | `skip_repair` |
+| R3 | Menej ako 50 validných súborov | `perform_repair` |
+| R4 | Odhadovaná úspešnosť ≥ 50 % | `perform_repair` |
+| R5 | Inak | `skip_repair` |
 
 **4. Výpočet očakávaného výsledku:**
 
-Ak sa rozhodne opravovať, skript vypočíta koľko súborov pravdepodobne pribudne po oprave a aký bude výsledný celkový počet validných fotografií. Ak sa oprava preskočí, počty zostávajú nezmenené.
+Ak `perform_repair`:
+- Počet dodatočných súborov = počet opraviteľných × odhadovaná úspešnosť
+- Finálny počet = aktuálne validné + dodatočné
 
-**5. Výsledky v uzle repairDecision:**
+**5. Zápis výsledkov a aktualizácia CoC:**
 
-Skript automaticky zapíše výsledky do uzla `repairDecision` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
-- Stratégia – perform_repair / skip_repair
-- Úroveň istoty – high / medium / low
+Zapíšte výsledky do uzla `repairDecision` v dokumentácii prípadu:
+- Stratégia – `perform_repair` / `skip_repair`
+- Použité pravidlo – R1 / R2 / R3 / R4 / R5
 - Odôvodnenie
 - Počet opraviteľných súborov
 - Odhadovaná úspešnosť opravy (%)
 - Očakávaný počet dodatočných súborov
 - Finálny očakávaný počet validných súborov
 
+Pridajte záznam do poľa `chainOfCustody`:
+```json
+{
+  "timestamp": "2025-01-26T16:05:00Z",
+  "analyst": "Meno Analytika",
+  "action": "Rozhodnutie o oprave: perform_repair – pravidlo R4, odhadovaná úspešnosť 72 %"
+}
+```
+
 **6. Archivácia výstupov:**
 
-Skript automaticky nahrá nasledujúci súbor do záložky **Přílohy** projektu:
-- `PHOTORECOVERY-2025-01-26-001_repair_decision.json` – rozhodnutie so stratégiou, odôvodnením a očakávaným výsledkom
+Archivujte do dokumentácie prípadu:
+- `${CASE_ID}_repair_decision.json` – rozhodnutie so stratégiou, odôvodnením a očakávaným výsledkom
+
+---
+
+> **Automatizácia (pripravuje sa):** Skript `ptrepairdecision` bude odhad úspešnosti, aplikáciu pravidiel, zápis uzla `repairDecision` a aktualizáciu CoC vykonávať automaticky.
 
 ## Výsledek
 
-Čistá analytická operácia – žiadne súbory sa nekopírujú ani nemenia. Výsledky zaznamenané v uzle `repairDecision`. Workflow pokračuje do kroku Oprava fotografií (ak `perform_repair`) alebo priamo do kroku EXIF analýza (ak `skip_repair`).
+Čistá analytická operácia – žiadne súbory sa nekopírujú ani nemenia. Výsledky zaznamenané v uzle `repairDecision`. Workflow pokračuje do Kroku 12 (ak `perform_repair`) alebo priamo do Kroku 13 (ak `skip_repair`).
 
 ## Reference
 
