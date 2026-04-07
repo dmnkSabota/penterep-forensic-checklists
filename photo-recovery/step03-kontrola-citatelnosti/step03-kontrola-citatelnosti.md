@@ -30,7 +30,19 @@ Fyzicky pripojte write-blocker a zapojte médium cez neho – nikdy nie priamo. 
 
 Identifikujte cestu k zariadeniu (napr. `/dev/sdb`) – použijete ju vo všetkých nasledujúcich príkazoch namiesto `/dev/sdX`.
 
-**2. Predbežná detekcia:**
+**2. Spustenie testu pomocou skriptu:**
+
+```bash
+# Iba terminálový výstup
+ptmediareadability /dev/sdb PHOTORECOVERY-2025-01-26-001 --analyst "Meno Analytika"
+
+# S JSON výstupom pre case.json
+ptmediareadability /dev/sdb PHOTORECOVERY-2025-01-26-001 --analyst "Meno Analytika" --output result.json
+```
+
+Skript vykoná potvrdenie write-blockera (manuálna výzva) a následne automaticky predbežnú detekciu a diagnostické testy.
+
+**3. Predbežná detekcia:**
 
 Overte, že OS zariadenie vidí, a zaznamenajte základné informácie:
 ```bash
@@ -61,7 +73,7 @@ mdadm --examine /dev/sdX
 ```
 Ak je médium súčasťou RAID poľa, upozornite klienta, že pre úplnú recovery je potrebný prístup ku všetkým členom poľa.
 
-**3. Diagnostické testy:**
+**4. Diagnostické testy:**
 
 Pokúste sa prečítať prvý sektor (512 B). Ak tento príkaz zlyhá, médium je nečitateľné:
 ```bash
@@ -85,32 +97,19 @@ Zmerajte rýchlosť čítania 10 MB – pod 5 MB/s znamená extrémne dlhý imag
 dd if=/dev/sdX of=/dev/null bs=512 count=20480 status=progress
 ```
 
-**4. Vyhodnotenie a klasifikácia:**
+**5. Vyhodnotenie a klasifikácia:**
 
 Na základe výsledkov klasifikujte médium:
 - Všetky testy prešli → **READABLE** → odporúčaný nástroj: `dc3dd`
 - Test sekvenčného čítania prešiel, niektoré iné zlyhali → **PARTIAL** → odporúčaný nástroj: `ddrescue`
-- Test prvého sektora zlyhal → **UNREADABLE** → pokračujte Krokom 4 (fyzická oprava)
+- Test prvého sektora zlyhal → **UNREADABLE** → pokračuje fyzická oprava média
 
 Ak boli identifikované kritické nálezy (aktívny TRIM, zlý SMART status, šifrovanie, RAID), informujte klienta o limitáciách recovery pred pokračovaním.
 
-**5. Zápis výsledkov a aktualizácia CoC:**
+**6. Zápis výsledkov a aktualizácia CoC:**
 
-Skript `ptmediareadability` môžete spustiť dvoma spôsobmi:
+Pri použití `--output` skript vytvorí JSON s dvoma uzlami:
 
-**Iba terminálový výstup (predvolené):**
-```bash
-ptmediareadability /dev/sdb PHOTORECOVERY-2025-01-26-001 --analyst "Meno Analytika"
-```
-Všetky výsledky sa zobrazia na terminále. Žiadny JSON súbor sa nevytvorí.
-
-**S JSON výstupom (pre case.json):**
-```bash
-ptmediareadability /dev/sdb PHOTORECOVERY-2025-01-26-001 --analyst "Meno Analytika" --output result.json
-```
-Výsledky sa zobrazia na terminále a zároveň sa vytvorí `result.json` s uzlami `readabilityTest` a `chainOfCustodyEntry` pripravenými na manuálne skopírovanie do `case.json`.
-
-**Obsah JSON výstupu:**
 ```json
 {
   "readabilityTest": {

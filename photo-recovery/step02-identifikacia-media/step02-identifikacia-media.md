@@ -18,11 +18,11 @@ Nie
 
 ## Popis
 
-Fyzická identifikácia média zabezpečuje jeho jednoznačné odlíšenie od ostatných artefaktov v laboratóriu a vytvára základ pre Chain of Custody dokumentáciu v súlade s ISO/IEC 27037:2012. Všetky záznamy z tohto kroku sú priamo prepojené s Case ID z Kroku 1.
+Fyzická identifikácia média zabezpečuje jeho jednoznačné odlíšenie od ostatných artefaktov v laboratóriu a vytvára základ pre Chain of Custody dokumentáciu v súlade s ISO/IEC 27037:2012. Všetky záznamy z tohto kroku sú priamo prepojené s Case ID z prijatia žiadosti.
 
 ## Jak na to
 
-**1. Informácie o médiu (podľa klienta):**
+**1. Informácie o médiu podľa klienta:**
 
 Zaznamenajte do dokumentácie základné informácie podľa toho, čo klient uvádza:
 - **Typ zariadenia** – SD karta / microSD / USB flash disk / HDD / SSD / iné
@@ -49,7 +49,7 @@ Zaznamenajte overené fyzické parametre zariadenia priamo z fyzickej nálepky a
 - **Dĺžka (mm)**, **Šírka (mm)**, **Výška (mm)**
 - **Kapacita (nálepka)**
 
-Typ zariadenia určuje, ktoré diagnostické nástroje budú relevantné v Kroku 3.
+Typ zariadenia určuje, ktoré diagnostické nástroje budú relevantné v teste čitateľnosti média.
 
 **4. Fyzický stav média:**
 
@@ -67,7 +67,7 @@ Ak je poškodenie prítomné, zaznamenajte v dokumentácii:
 
 **6. Viditeľné indikátory šifrovania:**
 
-Skontrolujte, či médium nenesie viditeľné znaky šifrovania – BitLocker štítok od výrobcu, VeraCrypt bootloader nálepku, alebo firemný bezpečnostný štítok. Ak sú prítomné, zaznamenajte to v dokumentácii a informujte klienta, že recovery kľúč alebo heslo bude nevyhnutné. Technická verifikácia šifrovania prebehne v Kroku 3.
+Skontrolujte, či médium nenesie viditeľné znaky šifrovania – BitLocker štítok od výrobcu, VeraCrypt bootloader nálepku, alebo firemný bezpečnostný štítok. Ak sú prítomné, zaznamenajte to v dokumentácii a informujte klienta, že recovery kľúč alebo heslo bude nevyhnutné. Technická verifikácia šifrovania prebehne v teste čitateľnosti média.
 
 **7. Fyzické označenie:**
 
