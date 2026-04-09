@@ -213,6 +213,16 @@ class PtForensicImaging:
         ptprint(f"  Target: {self.image_path}", "TEXT", condition=not self.args.json)
         ptprint(f"  Hash:   SHA-256 (integrated)", "TEXT", condition=not self.args.json)
         
+        # Get source size for progress calculation
+        try:
+            r = self._cmd(["blockdev", "--getsize64", self.device], timeout=5)
+            if r['ok'] and r['out']:
+                self.source_size = int(r['out'].strip())
+                ptprint(f"  Size:   {self.source_size:,} bytes ({self.source_size/(1024**3):.2f} GB)",
+                       "TEXT", condition=not self.args.json)
+        except:
+            pass
+        
         # FIXED: dc3dd syntax - minimal options only (dc3dd shows progress automatically)
         cmd = [
             "dc3dd",
@@ -228,16 +238,57 @@ class PtForensicImaging:
         t0 = time.time()
         
         try:
-            # Run with real-time output
+            # Run dc3dd in background
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    text=True, bufsize=1)
-            output_lines = []
-            for line in proc.stdout:
-                if not self.args.json:
-                    print(line, end='')
-                output_lines.append(line)
             
+            # Monitor progress by watching output file size
+            import threading
+            output_lines = []
+            proc_done = threading.Event()
+            
+            def read_output():
+                """Read dc3dd output in background thread"""
+                for line in proc.stdout:
+                    output_lines.append(line)
+                proc_done.set()
+            
+            # Start output reader thread
+            reader = threading.Thread(target=read_output, daemon=True)
+            reader.start()
+            
+            # Display progress by monitoring file size
+            last_pct = -1
+            while not proc_done.is_set():
+                time.sleep(0.5)  # Update every 0.5 seconds
+                
+                if self.image_path.exists() and self.source_size:
+                    current_size = self.image_path.stat().st_size
+                    pct = int(100 * current_size / self.source_size)
+                    
+                    if pct != last_pct and not self.args.json:
+                        # Draw progress bar
+                        bar_width = 20
+                        filled = int(bar_width * pct / 100)
+                        bar = '=' * filled + ('>' if filled < bar_width else '') + ' ' * (bar_width - filled - (1 if filled < bar_width else 0))
+                        
+                        gb_current = current_size / (1024**3)
+                        gb_total = self.source_size / (1024**3)
+                        
+                        elapsed = time.time() - t0
+                        speed = (current_size / (1024**2)) / elapsed if elapsed > 0 else 0
+                        
+                        progress_line = f"\rImaging: [{bar}] {pct:3d}% | {gb_current:.1f}/{gb_total:.1f} GB | {speed:.1f} MB/s"
+                        print(progress_line, end='', flush=True)
+                        last_pct = pct
+            
+            # Wait for process to complete
             proc.wait()
+            reader.join(timeout=5)
+            
+            if not self.args.json and last_pct >= 0:
+                print()  # New line after progress bar
+            
             self.duration = time.time() - t0
             
             if proc.returncode != 0:
@@ -279,7 +330,8 @@ class PtForensicImaging:
         # Calculate average speed
         if self.image_path.exists():
             size = self.image_path.stat().st_size
-            self.source_size = size
+            if not self.source_size:
+                self.source_size = size
             self.avg_speed = (size / (1024**2)) / self.duration if self.duration > 0 else 0
         
         # Create canonical hash file

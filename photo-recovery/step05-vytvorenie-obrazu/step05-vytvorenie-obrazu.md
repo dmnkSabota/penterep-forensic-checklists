@@ -18,9 +18,11 @@ Automatický
 
 ## Popis
 
-Forenzný imaging vytvára presnú bitovú kópiu úložného média, ktorá zachytáva všetko – aktívne súbory, vymazané dáta, slack space, nealokovaný priestor a metadata. SHA-256 hash sa počíta súčasne s kopírovaním v jednom priechode, čím sa eliminuje opätovné čítanie média. Výber nástroja: `dc3dd` pre READABLE médium, `ddrescue` pre PARTIAL médium.
+Forenzný imaging vytvára presnú bitovú kópiu úložného média, ktorá zachytáva všetko – aktívne súbory, vymazané dáta, slack space, nealokovaný priestor a metadata. SHA-256 hash sa počíta súčasne s kopírovaním v jednom priechode (dc3dd) alebo po dokončení (ddrescue). Výber nástroja: `dc3dd` pre READABLE médium, `ddrescue` pre PARTIAL médium.
 
 Originálne médium zostáva pripojené cez write-blocker. Všetky analýzy sa vykonávajú na kópii, čím je zabezpečená súdna prípustnosť dôkazu.
+
+Tool `ptforensicimaging` automatizuje proces – write-blocker confirmation, kontrolu predpokladov, imaging, hashovanie a vytvorenie kanonického hash súboru. Generuje standards-compliant JSON výstup.
 
 ## Jak na to
 
@@ -28,7 +30,7 @@ Originálne médium zostáva pripojené cez write-blocker. Všetky analýzy sa v
 
 Fyzicky pripojte write-blocker a zapojte médium cez neho – nikdy nie priamo. Overte, že LED indikátor svieti (PROTECTED).
 
-⚠️ Ak podmienka nie je splnená, nepokračujte – existuje riziko poškodenia dôkazu.
+⚠️ **Write-blocker je VŽDY povinný** – skript vyžaduje potvrdenie pred každým spustením. Ak podmienka nie je splnená, nepokračujte – existuje riziko poškodenia dôkazu.
 
 Identifikujte cestu k zariadeniu:
 ```bash
@@ -61,6 +63,9 @@ ptforensicimaging PHOTORECOVERY-2025-01-26-001 /dev/sdb dc3dd --analyst "Meno An
 
 # S JSON výstupom pre case.json
 ptforensicimaging PHOTORECOVERY-2025-01-26-001 /dev/sdb dc3dd --analyst "Meno Analytika" --json-out imaging_result.json
+
+# Pre PARTIAL médium (ddrescue)
+ptforensicimaging PHOTORECOVERY-2025-01-26-001 /dev/sdb ddrescue --analyst "Meno Analytika" --json-out imaging_result.json
 ```
 
 Skript vykoná potvrdenie write-blockera, kontrolu predpokladov a následne automaticky vykoná imaging a vytvorí kanonický hash súbor.
@@ -68,16 +73,16 @@ Skript vykoná potvrdenie write-blockera, kontrolu predpokladov a následne auto
 **5. Vykonanie imagingu:**
 
 **Pre READABLE médium – dc3dd:**
+
+dc3dd používa minimalistickú syntax (nepodporuje `bs=` ani `progress=` parametre):
 ```bash
 dc3dd if=/dev/sdX \
       of=/var/forensics/images/CASE-ID.dd \
       hash=sha256 \
-      log=/var/forensics/images/CASE-ID_imaging.log \
-      bs=1M \
-      progress=on
+      log=/var/forensics/images/CASE-ID_imaging.log
 ```
 
-dc3dd automaticky vypíše SHA-256 hash do konzoly aj do log súboru. Hash (64 hexadecimálnych znakov) sa zaznamenáva ako `source_hash`. Hash sa počíta počas kopírovania – jeden priechod médiom, žiadne dodatočné čítanie.
+dc3dd automaticky zobrazuje progress a vypíše SHA-256 hash do konzoly aj do log súboru. Hash (64 hexadecimálnych znakov) sa zaznamenáva ako `source_hash`. Hash sa počíta počas kopírovania – jeden priechod médiom, žiadne dodatočné čítanie.
 
 **Pre PARTIAL médium – ddrescue:**
 ```bash
@@ -92,6 +97,8 @@ ddrescue použije stratégiu minimalizácie stresu na médium – číta zdravé
 sha256sum /var/forensics/images/CASE-ID.dd
 ```
 
+Výstup ddrescue sa automaticky zapisuje do imaging log súboru spolu s command, timestamps a exit code.
+
 **6. Vytvorenie kanonického hash súboru:**
 
 Skript automaticky vytvorí `.sha256` súbor vo formáte kompatibilnom s `sha256sum -c`. Formát je: `HASH  FILENAME` (dve medzery medzi hashom a názvom súboru).
@@ -103,34 +110,61 @@ sha256sum -c CASE-ID.dd.sha256
 
 **7. Zápis výsledkov a aktualizácia CoC:**
 
-Pri použití `--json-out` sa vytvorí JSON s dvoma záznamami:
+Pri použití `--json-out` sa vytvorí JSON s forensic metadata:
 
 ```json
 {
-  "imagingResult": {
-    "devicePath": "/dev/sdb",
+  "forensicImaging": {
+    "version": "1.0.0",
+    "compliance": ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+    "caseId": "PHOTORECOVERY-2025-01-26-001",
     "timestamp": "2025-01-26T12:00:00Z",
-    "tool": "dc3dd",
-    "mediaStatus": "READABLE",
-    "imagePath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd",
-    "imageFormat": "raw (.dd)",
-    "sourceSizeBytes": 32017047552,
-    "sourceHash": "a3f5e8c9d2b1a7f4e6c8d9a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2",
-    "durationSeconds": 1847.5,
-    "averageSpeedMBps": 16.5,
-    "errorSectors": 0,
-    "imagingLog": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001_imaging.log",
-    "mapfile": null
-  },
-  "chainOfCustodyEntry": {
-    "timestamp": "2025-01-26T12:30:00Z",
     "analyst": "Meno Analytika",
-    "action": "Forenzný imaging dokončený – dc3dd, SHA-256: a3f5e8c9d2b1a7f4..."
+    "source": {
+      "devicePath": "/dev/sdb",
+      "mediaStatus": "READABLE",
+      "sizeBytes": 32017047552
+    },
+    "acquisition": {
+      "tool": "dc3dd",
+      "toolVersion": "7.2.646",
+      "method": "single-pass with integrated hashing",
+      "durationSeconds": 1847.5,
+      "averageSpeedMBps": 16.5
+    },
+    "output": {
+      "imagePath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd",
+      "imageFormat": "raw (.dd)",
+      "imageSizeBytes": 32017047552,
+      "imagingLog": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001_imaging.log",
+      "hashFile": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd.sha256"
+    },
+    "integrity": {
+      "writeBlockerConfirmed": true,
+      "errorSectors": 0,
+      "hashAlgorithm": "SHA-256",
+      "sourceHash": "a3f5e8c9d2b1a7f4e6c8d9a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2",
+      "verified": true
+    },
+    "chainOfCustody": {
+      "action": "Forensic imaging completed",
+      "result": "SUCCESS",
+      "analyst": "Meno Analytika",
+      "timestamp": "2025-01-26T12:30:00Z"
+    }
   }
 }
 ```
 
-Analytik manuálne skopíruje oba záznamy do `case.json`.
+JSON štruktúra:
+- `compliance` – explicitné deklarovanie štandardov (NIST, ISO)
+- `source` – informácie o zdrojovom médiu
+- `acquisition` – detaily procesu (tool, metóda, trvanie, rýchlosť)
+- `output` – vytvorené súbory (obraz, log, hash)
+- `integrity` – verifikácia (write-blocker, error sectors, hash)
+- `chainOfCustody` – audit trail záznam
+
+Analytik manuálne skopíruje JSON obsah do `case.json`.
 
 **8. Archivácia výstupov:**
 
@@ -144,20 +178,20 @@ Archivujte tieto súbory do dokumentácie prípadu.
 
 ## Výsledek
 
-Forenzný obraz vytvorený vo formáte `.dd`. SHA-256 `source_hash` vypočítaný a zaznamenaný v `imagingResult`. Kanonický hash súbor vytvorený pre verifikáciu. Záznamy pripravené na integráciu do dokumentácie. Originálne médium zostáva neporušené.
+Forenzný obraz vytvorený vo formáte `.dd`. SHA-256 `source_hash` vypočítaný a zaznamenaný. Kanonický hash súbor vytvorený pre verifikáciu. Standards-compliant JSON vygenerovaný s compliance metadata. Záznamy pripravené na integráciu do dokumentácie. Originálne médium zostáva neporušené.
 
 Workflow pokračuje do verifikácie integrity obrazu.
 
 ## Reference
 
-ISO/IEC 27037:2012 – Section 6.3 (Acquisition of digital evidence)
-NIST SP 800-86 – Section 3.1.1 (Collection Phase – Forensic Imaging)
-ACPO Good Practice Guide – Principle 1 & 2 (Evidence preservation)
+ISO/IEC 27037:2012 – Section 6.3 (Acquisition of digital evidence)  
+NIST SP 800-86 – Section 3.1.1 (Collection Phase – Forensic Imaging)  
+ACPO Good Practice Guide – Principle 1 & 2 (Evidence preservation)  
 NIST FIPS 180-4 – Secure Hash Standard (SHA-256 specification)
 
 ## Stav
 
-K otestovaniu
+Otestované
 
 ## Nález
 
