@@ -30,7 +30,7 @@ Tool `ptforensicimaging` automatizuje proces – write-blocker confirmation, kon
 
 Fyzicky pripojte write-blocker a zapojte médium cez neho – nikdy nie priamo. Overte, že LED indikátor svieti (PROTECTED).
 
-⚠️ **Write-blocker je VŽDY povinný** – skript vyžaduje potvrdenie pred každým spustením. Ak podmienka nie je splnená, nepokračujte – existuje riziko poškodenia dôkazu.
+**Write-blocker je VŽDY povinný** – skript vyžaduje potvrdenie pred každým spustením. Ak podmienka nie je splnená, nepokračujte – existuje riziko poškodenia dôkazu.
 
 Identifikujte cestu k zariadeniu:
 ```bash

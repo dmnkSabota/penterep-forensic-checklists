@@ -16,12 +16,21 @@ import sys
 import os
 import json
 import subprocess
+import signal
 from datetime import datetime, timezone
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from _version import __version__
 from ptlibs import ptprinthelper
 from ptlibs.ptprinthelper import ptprint
+
+# Override ptlibs signal handler to allow KeyboardInterrupt
+def _custom_sigint_handler(sig, frame):
+    """Custom SIGINT handler - raises KeyboardInterrupt instead of os._exit(1)"""
+    raise KeyboardInterrupt
+
+# Re-register signal handler AFTER ptlibs import
+signal.signal(signal.SIGINT, _custom_sigint_handler)
 
 SCRIPTNAME = "ptmediareadability"
 
@@ -50,6 +59,8 @@ class PtMediaReadability:
         self.recommended_tool = None
         self.next_step = None
         self.timestamp = datetime.now(timezone.utc).isoformat()
+        self.error_message = None  # Track errors for JSON
+        self.success = False  # Track overall success
         
         # Validate
         if not self.device.startswith("/dev/"):
@@ -88,7 +99,7 @@ class PtMediaReadability:
         ptprint(("✓" * 70 if ok else "✗" * 70), "OK" if ok else "ERROR", condition=True)
         return ok
 
-    def _cmd(self, cmd: List[str], timeout: int = 30) -> Dict[str, Any]:
+    def _cmd(self, cmd: List[str], timeout: Optional[int] = 30) -> Dict[str, Any]:
         """Execute command"""
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
@@ -133,12 +144,14 @@ class PtMediaReadability:
         # lsblk
         ptprint("\n[0a] lsblk - Device detection", "SUBTITLE", condition=not self.args.json)
         if not self._has("lsblk"):
+            self.error_message = "lsblk command not found"
             self.detection_results['lsblk'] = {"error": "command not found"}
             ptprint("✗ lsblk not installed", "ERROR", condition=not self.args.json)
             return False
         
         r = self._cmd(["lsblk", "-d", "-o", "NAME,SIZE,TYPE,MODEL,SERIAL,TRAN", self.device])
         if not r['ok']:
+            self.error_message = f"Device not detected: {r['err']}"
             self.detection_results['lsblk'] = {"visible": False, "error": r['err']}
             ptprint(f"✗ Device not detected: {r['err']}", "ERROR", condition=not self.args.json)
             return False
@@ -290,6 +303,7 @@ class PtMediaReadability:
             ptprint("✓ First sector readable", "OK", condition=not self.args.json)
         else:
             self.stats['testsFailed'] += 1
+            self.error_message = "First sector read failed - media UNREADABLE"
             ptprint("✗ CRITICAL: First sector FAILED - media UNREADABLE", "ERROR",
                    condition=not self.args.json, colortext=True)
         
@@ -433,34 +447,78 @@ class PtMediaReadability:
             for c in self.critical_findings:
                 ptprint(f"  • {c}", "WARNING", condition=not self.args.json)
         
+        if self.error_message:
+            ptprint(f"\nError: {self.error_message}", "ERROR", condition=not self.args.json)
+        
         ptprint("=" * 70, "TITLE", condition=not self.args.json)
 
     def save_json(self, filepath: str) -> None:
-        """Save results as case.json-ready JSON"""
+        """Save results as standards-compliant forensic JSON"""
+        
+        # Base structure with compliance metadata
         output = {
             "readabilityTest": {
-                "devicePath": self.device,
+                "version": __version__,
+                "compliance": ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+                "caseId": self.case_id,
                 "timestamp": self.timestamp,
-                "mediaStatus": self.media_status,
-                "recommendedTool": self.recommended_tool,
-                "nextStep": self.next_step,
-                "criticalFindings": self.critical_findings,
-                "statistics": self.stats,
-                "detectionResults": self.detection_results,
-                "diagnosticTests": self.diagnostic_tests
-            },
-            "chainOfCustodyEntry": {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "analyst": self.analyst,
-                "action": f"Test čitateľnosti média – výsledok: {self.media_status}",
-                "selectedTool": self.recommended_tool
+                "analyst": self.analyst
             }
         }
         
-        with open(filepath, 'w') as f:
+        # Device information
+        output["readabilityTest"]["device"] = {
+            "devicePath": self.device,
+            "mediaStatus": self.media_status,
+            "recommendedTool": self.recommended_tool,
+            "nextStep": self.next_step
+        }
+        
+        if self.success:
+            # SUCCESS case - full details
+            output["readabilityTest"]["criticalFindings"] = self.critical_findings
+            output["readabilityTest"]["statistics"] = self.stats
+            output["readabilityTest"]["detectionResults"] = self.detection_results
+            output["readabilityTest"]["diagnosticTests"] = self.diagnostic_tests
+            
+            # Chain of Custody
+            output["chainOfCustodyEntry"] = {
+                "action": f"Test čitateľnosti média – výsledok: {self.media_status}",
+                "result": "SUCCESS",
+                "analyst": self.analyst,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "selectedTool": self.recommended_tool
+            }
+        else:
+            # ERROR case - minimal data with error info
+            if self.error_message:
+                output["readabilityTest"]["errorMessage"] = self.error_message
+            
+            # Include partial results if any
+            if self.detection_results:
+                output["readabilityTest"]["detectionResults"] = self.detection_results
+            if self.diagnostic_tests:
+                output["readabilityTest"]["diagnosticTests"] = self.diagnostic_tests
+            if self.critical_findings:
+                output["readabilityTest"]["criticalFindings"] = self.critical_findings
+            
+            # Chain of Custody for failure
+            output["chainOfCustodyEntry"] = {
+                "action": "Test čitateľnosti média – zlyhanie",
+                "result": "ERROR",
+                "analyst": self.analyst,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            if self.error_message:
+                output["chainOfCustodyEntry"]["errorDetails"] = self.error_message
+        
+        # Write with proper formatting
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(output, f, indent=2, ensure_ascii=False)
+            f.write('\n')  # Add trailing newline
 
-    def run(self) -> None:
+    def run(self) -> bool:
         """Main execution"""
         ptprint("=" * 70, "TITLE", condition=not self.args.json)
         ptprint(f"MEDIA READABILITY TEST v{__version__}", "TITLE", condition=not self.args.json)
@@ -472,11 +530,16 @@ class PtMediaReadability:
             self.media_status = "UNREADABLE"
             self.recommended_tool = "Physical repair required"
             self.next_step = 4
-            return
+            return False
         
-        self.tests()
+        if not self.tests():
+            self.classify()
+            return False
+        
         self.classify()
+        self.success = True
         self.summary()
+        return True
 
 
 def get_help() -> List[Dict]:
@@ -518,9 +581,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("-a", "--analyst", default="Analyst")
     p.add_argument("-o", "--output", help="JSON output file (optional)")
     p.add_argument("--version", action="version", version=f"{SCRIPTNAME} {__version__}")
+    
     if len(sys.argv) == 1 or {"-h", "--help"} & set(sys.argv):
         ptprinthelper.help_print(get_help(), SCRIPTNAME, __version__)
         sys.exit(0)
+    
     args = p.parse_args()
     args.json = bool(args.output)
     ptprinthelper.print_banner(SCRIPTNAME, __version__, args.json)
@@ -538,7 +603,7 @@ def main() -> int:
             return 99
         
         tool = PtMediaReadability(args)
-        tool.run()
+        success = tool.run()
         
         # Save JSON only if --output specified
         if args.output:
@@ -550,7 +615,7 @@ def main() -> int:
                 ptprint(f"\n✗ Error saving JSON: {e}", "ERROR", condition=True)
                 return 99
         
-        return {"READABLE": 0, "PARTIAL": 1, "UNREADABLE": 2}.get(tool.media_status, 99)
+        return {"READABLE": 0, "PARTIAL": 1, "UNREADABLE": 2}.get(tool.media_status, 99) if success else 99
     
     except KeyboardInterrupt:
         ptprint("\nInterrupted by user", "WARNING", condition=True)

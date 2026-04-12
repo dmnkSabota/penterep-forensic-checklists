@@ -26,7 +26,7 @@ Tento rozhodovací bod určuje kľúčové vetvenie pracovného postupu. Analyti
 
 Fyzicky pripojte write-blocker a zapojte médium cez neho – nikdy nie priamo. Overte, že LED indikátor svieti (PROTECTED). Pri mechanických HDD skontrolujte, či zariadenie nevydáva nezvyčajné zvuky (škrabanie, cvakanie).
 
-⚠️ Ak niektorá podmienka nie je splnená, nepokračujte – existuje riziko poškodenia dôkazu.
+Ak niektorá podmienka nie je splnená, nepokračujte – existuje riziko poškodenia dôkazu.
 
 Identifikujte cestu k zariadeniu (napr. `/dev/sdb`) – použijete ju vo všetkých nasledujúcich príkazoch namiesto `/dev/sdX`.
 
@@ -108,25 +108,90 @@ Ak boli identifikované kritické nálezy (aktívny TRIM, zlý SMART status, ši
 
 **6. Zápis výsledkov a aktualizácia CoC:**
 
-Pri použití `--output` skript vytvorí JSON s dvoma uzlami:
+Pri použití `--output` skript vytvorí JSON s forensic metadata:
 
 ```json
 {
   "readabilityTest": {
-    "devicePath": "/dev/sdb",
-    "timestamp": "2025-01-26T10:00:00Z",
-    "mediaStatus": "READABLE",
-    "recommendedTool": "dc3dd",
-    "nextStep": 5,
-    "criticalFindings": [],
-    "statistics": {...},
-    "detectionResults": {...},
-    "diagnosticTests": [...]
-  },
-  "chainOfCustodyEntry": {
+    "version": "1.0.0",
+    "compliance": ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+    "caseId": "PHOTORECOVERY-2025-01-26-001",
     "timestamp": "2025-01-26T10:00:00Z",
     "analyst": "Meno Analytika",
+    "device": {
+      "devicePath": "/dev/sdb",
+      "mediaStatus": "READABLE",
+      "recommendedTool": "dc3dd",
+      "nextStep": 5
+    },
+    "criticalFindings": [],
+    "statistics": {
+      "testsRun": 4,
+      "testsPassed": 4,
+      "testsFailed": 0
+    },
+    "detectionResults": {
+      "lsblk": {
+        "visible": true,
+        "output": "NAME SIZE TYPE MODEL SERIAL TRAN\nsdb 29.8G disk SanDisk_3.2Gen1 ...",
+        "sizeBytes": 32017047552
+      },
+      "blkid": {
+        "output": "/dev/sdb: LABEL=\"PHOTOS\" TYPE=\"vfat\"",
+        "encrypted": false,
+        "encryptionType": null
+      },
+      "smartctl": {
+        "smartAvailable": false,
+        "smartWarnings": []
+      },
+      "hdparm": {
+        "trimActive": false
+      },
+      "mdadm": {
+        "isRaidMember": false,
+        "raidInfo": null
+      }
+    },
+    "diagnosticTests": [
+      {
+        "testId": 1,
+        "testName": "First Sector",
+        "success": true,
+        "bytesRead": 512
+      },
+      {
+        "testId": 2,
+        "testName": "Sequential Read 1MB",
+        "success": true,
+        "bytesRead": 1048576
+      },
+      {
+        "testId": 3,
+        "testName": "Random Read",
+        "success": true,
+        "positions": [
+          {"position": "start", "offsetBytes": 2048, "success": true},
+          {"position": "middle", "offsetBytes": 16008523776, "success": true},
+          {"position": "end", "offsetBytes": 31006576640, "success": true}
+        ],
+        "successfulReads": 3,
+        "totalReads": 3
+      },
+      {
+        "testId": 4,
+        "testName": "Read Speed",
+        "success": true,
+        "speedMBps": 42.5,
+        "speedStatus": "GOOD"
+      }
+    ]
+  },
+  "chainOfCustodyEntry": {
     "action": "Test čitateľnosti média – výsledok: READABLE",
+    "result": "SUCCESS",
+    "analyst": "Meno Analytika",
+    "timestamp": "2025-01-26T10:00:00Z",
     "selectedTool": "dc3dd"
   }
 }
@@ -140,8 +205,8 @@ Stav média je klasifikovaný ako READABLE, PARTIAL alebo UNREADABLE. Výsledky 
 
 ## Reference
 
-ISO/IEC 27037:2012 – Section 6.3 (Acquisition of digital evidence)
-NIST SP 800-86 – Section 3.1.1.3 (Data Collection Methodology)
+ISO/IEC 27037:2012 – Section 6.3 (Acquisition of digital evidence)  
+NIST SP 800-86 – Section 3.1.1.3 (Data Collection Methodology)  
 ACPO Good Practice Guide – Principle 1 (No action should change data)
 
 ## Stav
