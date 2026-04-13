@@ -83,11 +83,10 @@ class FilesystemAnalysisTool:
     def __init__(self):
         self.case_id = None
         self.analyst = "Analyst"
-        self.output_dir = Path("/var/forensics/images")
+        self.image_path = None
         self.output_file = None
         
         # Image info
-        self.image_path = None
         self.image_size = None
         
         # Analysis results
@@ -138,53 +137,11 @@ class FilesystemAnalysisTool:
         """Fail with error message."""
         self.error_message = msg
         self.success = False
-        print(f"\n✗ ERROR: {msg}\n", file=sys.stderr)
-    
-    def load_image_path(self):
-        """Load forensic image path from Step 6 verification JSON."""
-        print("\n[1/3] Loading Image Path from Step 6")
-        
-        # Find Step 6 verification JSON
-        candidates = sorted(
-            self.output_dir.glob(f"{self.case_id}*verification*.json"),
-            reverse=True
-        )
-        
-        for candidate in candidates:
-            try:
-                with open(candidate, 'r') as f:
-                    data = json.load(f)
-                
-                # Try different JSON structures
-                image_path = None
-                if "hashVerification" in data:
-                    image_path = data["hashVerification"].get("image", {}).get("imagePath")
-                elif "result" in data and "properties" in data["result"]:
-                    image_path = data["result"]["properties"].get("imagePath")
-                
-                if image_path and Path(image_path).exists():
-                    self.image_path = Path(image_path)
-                    self.image_size = self.image_path.stat().st_size
-                    print(f"✓ Image path loaded: {self.image_path.name}")
-                    return True
-            except Exception as e:
-                print(f"  Warning: Could not read {candidate.name}: {e}")
-                continue
-        
-        # Fallback: default image location
-        fallback = self.output_dir / f"{self.case_id}.dd"
-        if fallback.exists():
-            self.image_path = fallback
-            self.image_size = fallback.stat().st_size
-            print(f"✓ Image found at default location: {fallback.name}")
-            return True
-        
-        self._fail("Cannot find forensic image – run Steps 5 and 6 first")
-        return False
+        print(f"\n[ERROR] ERROR: {msg}\n", file=sys.stderr)
     
     def check_tools(self):
         """Verify The Sleuth Kit tools are available."""
-        print("\n[2/3] Checking The Sleuth Kit Tools")
+        print("\n[1/2] Checking The Sleuth Kit Tools")
         
         missing = [t for t in ("mmls", "fsstat", "fls") if not self._has(t)]
         
@@ -192,12 +149,12 @@ class FilesystemAnalysisTool:
             self._fail(f"Missing tools: {', '.join(missing)} – install with: sudo apt install sleuthkit")
             return False
         
-        print("✓ All TSK tools available (mmls, fsstat, fls)")
+        print("[OK] All TSK tools available (mmls, fsstat, fls)")
         return True
     
     def analyze_partitions(self):
         """Detect partition table and partitions using mmls."""
-        print("\n[3/3] Analyzing Filesystem\n")
+        print("\n[2/2] Analyzing Filesystem\n")
         
         stdout, stderr, ret = self._cmd(["mmls", str(self.image_path)])
         
@@ -298,7 +255,7 @@ class FilesystemAnalysisTool:
             self.filesystem_recognized = True
             label_str = f" | Label: {fs_info['label']}" if fs_info['label'] else ""
             print(f"  Type: {fs_info['type']}{label_str}")
-            print(f"  ✓ Filesystem recognized")
+            print(f"  [OK] Filesystem recognized")
         else:
             print(f"  Could not identify filesystem type")
         
@@ -341,7 +298,7 @@ class FilesystemAnalysisTool:
                     active += 1
         
         self.directory_readable = True
-        print(f"  ✓ Directory readable: {active + deleted} entries (active: {active}, deleted: {deleted})")
+        print(f"  [OK] Directory readable: {active + deleted} entries (active: {active}, deleted: {deleted})")
         return True, active, deleted, file_list
     
     def identify_image_files(self, file_list):
@@ -435,7 +392,7 @@ class FilesystemAnalysisTool:
         if self.output_file:
             with open(self.output_file, 'w') as f:
                 json.dump(data, f, indent=2)
-            print(f"\n✓ Report saved: {Path(self.output_file).name}")
+            print(f"\n[OK] Report saved: {Path(self.output_file).name}")
         else:
             # Print to stdout
             print("\n" + "="*70)
@@ -453,11 +410,15 @@ class FilesystemAnalysisTool:
             print("="*70)
             print(f"Version: {__version__}")
             print(f"Case ID: {self.case_id}")
+            print(f"Image: {self.image_path}")
             print("="*70)
             
-            # Load image
-            if not self.load_image_path():
+            # Validate image exists
+            if not self.image_path.exists():
+                self._fail(f"Image file not found: {self.image_path}")
                 return 1
+            
+            self.image_size = self.image_path.stat().st_size
             
             # Check tools
             if not self.check_tools():
@@ -518,18 +479,18 @@ class FilesystemAnalysisTool:
             print(f"Method: {method}")
             
             if method == "filesystem_scan":
-                print("Next: Step 8a (Filesystem Recovery)")
+                print("Next: Filesystem Recovery")
             elif method == "file_carving":
-                print("Next: Step 8b (File Carving)")
+                print("Next: File Carving")
             else:  # hybrid
-                print("Next: Step 8a and 8b (Hybrid Recovery)")
+                print("Next: Hybrid Recovery (Filesystem + Carving)")
             
             print("="*70)
             
             return 0
             
         except KeyboardInterrupt:
-            print("\n\n⚠️  Operation interrupted by user (Ctrl+C)", file=sys.stderr)
+            print("\n\n[WARNING]  Operation interrupted by user (Ctrl+C)", file=sys.stderr)
             return 130
         except Exception as e:
             self._fail(f"Unexpected error: {e}")
@@ -546,13 +507,10 @@ def main():
         epilog="""
 Examples:
   # Basic usage
-  ptfilesystemanalysis CASE-001 --analyst "John Doe"
-  
-  # With custom output directory
-  ptfilesystemanalysis CASE-001 --output-dir /mnt/forensics --analyst "Jane Smith"
+  ptfilesystemanalysis CASE-001 /var/forensics/images/CASE-001.dd --analyst "John Doe"
   
   # With JSON output file
-  ptfilesystemanalysis CASE-001 --output step7_analysis.json
+  ptfilesystemanalysis CASE-001 /path/to/image.dd --output step7_analysis.json --analyst "Jane"
 
 Exit Codes:
   0   - Success (analysis completed)
@@ -566,8 +524,7 @@ Standards:
     )
     
     parser.add_argument("case_id", help="Case ID (e.g., CASE-2025-001)")
-    parser.add_argument("--output-dir", "-d", default="/var/forensics/images",
-                        help="Forensic images directory (default: /var/forensics/images)")
+    parser.add_argument("image", help="Path to forensic image file (.dd)")
     parser.add_argument("--analyst", "-a", default="Analyst",
                         help="Analyst name for Chain of Custody")
     parser.add_argument("--output", "-o", dest="output",
@@ -579,7 +536,7 @@ Standards:
     tool = FilesystemAnalysisTool()
     tool.case_id = args.case_id
     tool.analyst = args.analyst
-    tool.output_dir = Path(args.output_dir)
+    tool.image_path = Path(args.image)
     tool.output_file = args.output if args.output else None
     
     exit_code = tool.run()
