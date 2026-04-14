@@ -20,13 +20,13 @@ Stredná
 
 File carving vyhľadáva súbory priamo v raw dátach forenzného obrazu podľa ich byte signatúr (magic bytes) – nezávisle od súborového systému. Tento prístup funguje aj vtedy, keď je súborový systém úplne poškodený alebo neexistuje. Nevýhodou je strata pôvodných názvov súborov, adresárovej štruktúry a FS timestamps.
 
-Krok sa vykonáva pri stratégii `file_carving` alebo `hybrid` (zistená v Kroku 7). Pri stratégii `filesystem_scan` tento krok preskočte.
+Vykonáva sa pri stratégii `file_carving` alebo `hybrid` (určenej analýzou súborového systému). Pri stratégii `filesystem_scan` tento krok preskočte.
 
 ## Jak na to
 
 **1. Overenie stratégie a príprava:**
 
-Skontrolujte uzol `filesystemAnalysis` (Krok 7) – stratégia musí byť `file_carving` alebo `hybrid`. Pri `filesystem_scan` tento krok preskočte.
+Z výstupu analýzy súborového systému skontrolujte odporúčanú stratégiu – musí byť `file_carving` alebo `hybrid`. Pri `filesystem_scan` tento krok preskočte.
 
 Overte dostupnosť nástrojov:
 ```bash
@@ -109,7 +109,7 @@ exiftool -json subor > "${OUTPUT_DIR}/metadata/nazov_suboru.json"
 
 **7. Zápis výsledkov a aktualizácia CoC:**
 
-Zapíšte výsledky do uzla `fileCarvingRecovery` v dokumentácii prípadu:
+Zapíšte výsledky file carving do dokumentácie prípadu:
 - Metóda obnovy – file_carving / hybrid
 - Celkový počet carved súborov (z PhotoRec)
 - Počet validných obrazových súborov
@@ -119,7 +119,7 @@ Zapíšte výsledky do uzla `fileCarvingRecovery` v dokumentácii prípadu:
 - Miera duplikácie (%)
 - Extrakcia metadát – áno / nie
 
-Pridajte záznam do poľa `chainOfCustody`:
+Pridajte záznam do Chain of Custody:
 ```json
 {
   "timestamp": "2025-01-26T15:00:00Z",
@@ -134,13 +134,9 @@ Archivujte do dokumentácie prípadu:
 - `${CASE_ID}_carving_report.json` – kompletný report obnovy
 - `CARVING_REPORT.txt` – textový katalóg súborov a štatistiky
 
----
-
-> **Automatizácia (pripravuje sa):** Skript `ptfilecarving` bude spustenie PhotoRec, validáciu, deduplikáciu, zápis uzla `fileCarvingRecovery` a aktualizáciu CoC vykonávať automaticky.
-
 ## Výsledek
 
-Obnovené súbory organizované podľa formátu v `${CASE_ID}_carved/organized/` (jpg/, png/, tiff/, raw/, other/), poškodené v `corrupted/`, duplikáty v `duplicates/`. Zachované: EXIF metadáta a obsah fotografií. Stratené: pôvodné názvy súborov, adresárová štruktúra a FS timestamps. Výsledky zaznamenané v uzle `fileCarvingRecovery`. Workflow pokračuje do Kroku 9 (Konsolidácia).
+Obnovené súbory organizované podľa formátu v `${CASE_ID}_carved/organized/` (jpg/, png/, tiff/, raw/, other/), poškodené v `corrupted/`, duplikáty v `duplicates/`. Zachované: EXIF metadáta a obsah fotografií. Stratené: pôvodné názvy súborov, adresárová štruktúra a FS timestamps. Výsledky zaznamenané v dokumentácii prípadu. Workflow pokračuje do konsolidácie fotografií.
 
 ## Reference
 

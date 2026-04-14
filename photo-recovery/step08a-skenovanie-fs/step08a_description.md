@@ -18,13 +18,13 @@ Stredná
 
 ## Popis
 
-Filesystem recovery využíva zachovanú adresárovú štruktúru forenzného obrazu na identifikáciu a extrakciu obrazových súborov pomocou nástrojov `fls` a `icat` z balíka The Sleuth Kit. Pôvodné názvy súborov, adresárová štruktúra a FS timestamps sú zachované. Krok sa vykonáva pri stratégii `filesystem_scan` alebo `hybrid` (zistená v Kroku 7).
+Filesystem recovery využíva zachovanú adresárovú štruktúru forenzného obrazu na identifikáciu a extrakciu obrazových súborov pomocou nástrojov `fls` a `icat` z balíka The Sleuth Kit. Pôvodné názvy súborov, adresárová štruktúra a FS timestamps sú zachované. Vykonáva sa pri stratégii `filesystem_scan` alebo `hybrid` (určenej analýzou súborového systému).
 
 ## Jak na to
 
 **1. Overenie stratégie a príprava:**
 
-Skontrolujte uzol `filesystemAnalysis` (Krok 7) – stratégia musí byť `filesystem_scan` alebo `hybrid`. Pri `file_carving` tento krok preskočte a pokračujte Krokom 8b.
+Z výstupu analýzy súborového systému skontrolujte odporúčanú stratégiu – musí byť `filesystem_scan` alebo `hybrid`. Pri `file_carving` tento krok preskočte a pokračujte File Carving.
 
 Overte dostupnosť nástrojov:
 ```bash
@@ -39,7 +39,7 @@ Nastavte premenné:
 ```bash
 CASE_ID="PHOTORECOVERY-2025-01-26-001"
 IMAGE="/forenzne/pripady/${CASE_ID}/${CASE_ID}.dd"
-OFFSET=0          # z mmls výstupu v Kroku 7
+OFFSET=0          # z mmls výstupu (analýza súborového systému)
 OUTPUT_DIR="/forenzne/pripady/${CASE_ID}/${CASE_ID}_recovered"
 mkdir -p "${OUTPUT_DIR}/active" "${OUTPUT_DIR}/deleted" "${OUTPUT_DIR}/corrupted" "${OUTPUT_DIR}/metadata"
 ```
@@ -80,7 +80,7 @@ exiftool -json subor > "${OUTPUT_DIR}/metadata/nazov_suboru.json"
 
 **5. Zápis výsledkov a aktualizácia CoC:**
 
-Zapíšte výsledky do uzla `filesystemRecovery` v dokumentácii prípadu:
+Zapíšte výsledky filesystem recovery do dokumentácie prípadu:
 - Metóda obnovy – filesystem_scan / hybrid
 - Počet prehľadaných súborov
 - Počet obnovených aktívnych súborov
@@ -91,7 +91,7 @@ Zapíšte výsledky do uzla `filesystemRecovery` v dokumentácii prípadu:
 - Extrakcia metadát – áno / nie
 - Nutnosť následného File Carving – áno / nie (pri `hybrid`)
 
-Pridajte záznam do poľa `chainOfCustody`:
+Pridajte záznam do Chain of Custody:
 ```json
 {
   "timestamp": "2025-01-26T14:00:00Z",
@@ -104,13 +104,9 @@ Pridajte záznam do poľa `chainOfCustody`:
 
 Uložte súhrn výsledkov do `${CASE_ID}_recovery_report.json` a archivujte ho v dokumentácii prípadu.
 
----
-
-> **Automatizácia (pripravuje sa):** Skript `ptfilesystemrecovery` bude celý proces extrakcie, validácie, zápis uzla `filesystemRecovery` a aktualizáciu CoC vykonávať automaticky.
-
 ## Výsledek
 
-Obnovené súbory uložené v `${CASE_ID}_recovered/`: aktívne v `active/`, vymazané v `deleted/`, čiastočne poškodené v `corrupted/`. Výsledky zaznamenané v uzle `filesystemRecovery`. Workflow pokračuje do Kroku 8b (ak `hybrid`) alebo priamo do Kroku 9 (Konsolidácia).
+Obnovené súbory uložené v `${CASE_ID}_recovered/`: aktívne v `active/`, vymazané v `deleted/`, čiastočne poškodené v `corrupted/`. Výsledky zaznamenané v dokumentácii prípadu. Workflow pokračuje do File Carving (ak `hybrid`) alebo priamo do konsolidácie fotografií.
 
 ## Reference
 
