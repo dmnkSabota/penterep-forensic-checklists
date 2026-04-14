@@ -2,7 +2,7 @@
 
 ## Úkol
 
-Je potrebná oprava poškodených fotografií?
+Rozhodnúť, či má zmysel pokúsiť sa o opravu poškodených fotografií.
 
 ## Obtiažnosť
 
@@ -18,63 +18,67 @@ Jednoduchá
 
 ## Popis
 
-Skript rozhodne, či má zmysel pokúsiť sa o opravu poškodených súborov. Načíta výsledky validácie z uzla `integrityValidation` (Krok 10) a na základe piatich prioritných pravidiel určí stratégiu: `perform_repair` alebo `skip_repair`. Výsledok je čisto analytický – žiadne súbory sa v tomto kroku nemenia.
+Tento krok analyzuje výsledky validácie integrity a rozhodne, či je nákladovo efektívne pokúsiť sa o opravu poškodených súborov. Načíta výsledky z validácie integrity a na základe piatich prioritných pravidiel určí stratégiu: `perform_repair` (pokračuje do opravy fotografií) alebo `skip_repair` (preskočí opravu a pokračuje priamo na EXIF analýzu). Výsledok je čisto analytický – žiadne súbory sa v tomto kroku nemenia.
 
 ## Jak na to
 
 **1. Prečítanie výsledkov validácie:**
 
-Z uzla `integrityValidation` (Krok 10) si zapíšte:
-- Počet validných súborov
-- Počet poškodených súborov
-- Počet neopraviteľných súborov
-- Integrity score (%)
-- Zoznam `filesNeedingRepair` s typmi poškodení a úrovňami opraviteľnosti (L1–L5)
+Z výstupu validácie integrity si zapíšte:
+- Počet VALID súborov
+- Počet REPAIRABLE súborov
+- Počet CORRUPTED súborov
+- Validation rate (%)
+- Typy poškodení pre REPAIRABLE súbory
 
 **2. Odhad úspešnosti opravy:**
 
-Pre každý súbor v `filesNeedingRepair` priraďte empirickú mieru úspešnosti:
+Pre každý súbor v kategórii REPAIRABLE priraďte empirickú mieru úspešnosti podľa typu poškodenia:
 
 | Typ poškodenia | Odhadovaná úspešnosť |
 |----------------|----------------------|
 | truncated | 85 % |
+| invalid_header | 85 % |
 | corrupt_segments | 60 % |
 | corrupt_data | 40 % |
 | fragmented | 15 % |
-| unknown / invalid_header | 0 % |
+| unknown | 30 % |
 
-Vypočítajte vážený priemer naprieč všetkými opraviteľnými súbormi (L1–L4). Súbory L5 do výpočtu nezahrňujte.
+Vypočítajte vážený priemer naprieč všetkými REPAIRABLE súbormi.
 
 **3. Aplikácia rozhodovacích pravidiel:**
 
 Prechádzajte pravidlá v poradí a zastavte sa pri prvom, ktoré platí:
 
-| # | Podmienka | Rozhodnutie |
-|---|-----------|-------------|
-| R1 | Žiadne poškodené súbory (corrupted = 0) | `skip_repair` |
-| R2 | Žiadny súbor nie je opraviteľný (všetky L5) | `skip_repair` |
-| R3 | Menej ako 50 validných súborov | `perform_repair` |
-| R4 | Odhadovaná úspešnosť ≥ 50 % | `perform_repair` |
-| R5 | Inak | `skip_repair` |
+| # | Podmienka | Rozhodnutie | Priorita |
+|---|-----------|-------------|----------|
+| R1 | Žiadne CORRUPTED súbory | `skip_repair` | Vysoká |
+| R2 | Žiadne REPAIRABLE súbory | `skip_repair` | Vysoká |
+| R3 | Menej ako 50 VALID súborov | `perform_repair` | Stredná |
+| R4 | Odhadovaná úspešnosť ≥ 50 % | `perform_repair` | Vysoká |
+| R5 | Inak | `skip_repair` | Vysoká |
 
 **4. Výpočet očakávaného výsledku:**
 
-Ak `perform_repair`:
-- Počet dodatočných súborov = počet opraviteľných × odhadovaná úspešnosť
-- Finálny počet = aktuálne validné + dodatočné
+Ak je rozhodnutie `perform_repair`:
+```
+Dodatočné súbory = počet REPAIRABLE × (odhadovaná úspešnosť / 100)
+Finálny počet = aktuálne VALID + dodatočné súbory
+Zlepšenie (%) = (dodatočné / VALID) × 100
+```
 
 **5. Zápis výsledkov a aktualizácia CoC:**
 
-Zapíšte výsledky do uzla `repairDecision` v dokumentácii prípadu:
+Zapíšte výsledky rozhodnutia do dokumentácie prípadu:
 - Stratégia – `perform_repair` / `skip_repair`
 - Použité pravidlo – R1 / R2 / R3 / R4 / R5
 - Odôvodnenie
-- Počet opraviteľných súborov
+- Počet REPAIRABLE súborov
 - Odhadovaná úspešnosť opravy (%)
-- Očakávaný počet dodatočných súborov
-- Finálny očakávaný počet validných súborov
+- Očakávaný počet dodatočných súborov (ak perform_repair)
+- Finálny očakávaný počet VALID súborov
 
-Pridajte záznam do poľa `chainOfCustody`:
+Pridajte záznam do Chain of Custody:
 ```json
 {
   "timestamp": "2025-01-26T16:05:00Z",
@@ -88,13 +92,9 @@ Pridajte záznam do poľa `chainOfCustody`:
 Archivujte do dokumentácie prípadu:
 - `${CASE_ID}_repair_decision.json` – rozhodnutie so stratégiou, odôvodnením a očakávaným výsledkom
 
----
-
-> **Automatizácia (pripravuje sa):** Skript `ptrepairdecision` bude odhad úspešnosti, aplikáciu pravidiel, zápis uzla `repairDecision` a aktualizáciu CoC vykonávať automaticky.
-
 ## Výsledek
 
-Čistá analytická operácia – žiadne súbory sa nekopírujú ani nemenia. Výsledky zaznamenané v uzle `repairDecision`. Workflow pokračuje do Kroku 12 (ak `perform_repair`) alebo priamo do Kroku 13 (ak `skip_repair`).
+Čistá analytická operácia – žiadne súbory sa nekopírujú ani nemenia. Výsledky zaznamenané v dokumentácii prípadu. Workflow pokračuje do opravy fotografií (ak `perform_repair`) alebo priamo do EXIF analýzy (ak `skip_repair`).
 
 ## Reference
 

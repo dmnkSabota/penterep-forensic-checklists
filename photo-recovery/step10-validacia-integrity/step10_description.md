@@ -2,15 +2,15 @@
 
 ## Úkol
 
-Overiť fyzickú integritu všetkých obnovených fotografií a rozdeliť ich do kategórií.
+Validovať integritu obnovených fotografií a identifikovať poškodené súbory.
 
 ## Obtiažnosť
 
-Jednoduchá
+Stredná
 
 ## Časová náročnosť
 
-30 minút
+30 minút – 2 hodiny (závisí od počtu súborov)
 
 ## Automatický test
 
@@ -18,124 +18,136 @@ Jednoduchá
 
 ## Popis
 
-Tento krok overuje, či sú obnovené súbory skutočne čitateľné a nepoškodené. Pre každý súbor z konsolidovaného datasetu (Krok 9) sa vykoná viacúrovňová validácia a výsledok sa klasifikuje ako valid, corrupted alebo unrecoverable. Tento výsledok priamo určuje, či je potrebná oprava v Kroku 12.
+Tento krok validuje každý obnovený obrazový súbor pomocou trojstupňovej kontroly: (1) veľkosť súboru, (2) typ obsahu (`file`), (3) technická čitateľnosť (`identify` pre JPEG/PNG/TIFF, format-specific nástroje pre RAW). Klasifikuje súbory do kategórií: VALID (úplne v poriadku), REPAIRABLE (čiastočné poškodenie, možno opraviť), CORRUPTED (vážne poškodenie, pravdepodobne neopraviteľné).
 
 ## Jak na to
 
-**1. Príprava a kontrola nástrojov:**
+**1. Nastavenie premenných:**
 
-PIL/Pillow je povinný:
-```bash
-pip install Pillow
-```
-Voliteľné nástroje (skript ich využije ak sú dostupné):
-```bash
-sudo apt-get install libjpeg-progs pngcheck
-```
-
-Nastavte premenné:
 ```bash
 CASE_ID="PHOTORECOVERY-2025-01-26-001"
 CONSOL="/forenzne/pripady/${CASE_ID}/${CASE_ID}_consolidated"
-VALID_DIR="/forenzne/pripady/${CASE_ID}/${CASE_ID}_validation"
-mkdir -p "${VALID_DIR}/valid" "${VALID_DIR}/corrupted" "${VALID_DIR}/unrecoverable"
+OUTPUT="${CONSOL}/validation"
+mkdir -p "${OUTPUT}/valid" "${OUTPUT}/repairable" "${OUTPUT}/corrupted"
 ```
 
-**2. Per-file validácia:**
+**2. Inštalácia validačných nástrojov:**
 
-Pre každý súbor z master katalógu vykonajte nasledujúce kontroly:
-
-**a) Veľkosť súboru** – prázdne súbory sú okamžite neopraviteľné:
 ```bash
-[ -s subor ] && echo "OK" || echo "EMPTY – unrecoverable"
+sudo apt-get install imagemagick exiftool jpeginfo pngcheck libtiff-tools
 ```
 
-**b) PIL verify + load** (Python):
-```python
-from PIL import Image
-try:
-    img = Image.open("subor")
-    img.verify()
-    img.close()
-    img = Image.open("subor")
-    img.load()
-    print("VALID")
-except Exception as e:
-    print(f"CORRUPTED: {e}")
-```
+**3. Trojstupňová validácia pre každý súbor:**
 
-**c) Pre JPEG – jpeginfo** (ak je dostupný):
+Pre každý súbor v `${CONSOL}/fs_based/` a `${CONSOL}/carved/`:
+
+**Stupeň 1 – Minimálna veľkosť:**
 ```bash
-jpeginfo -c subor
+SIZE=$(stat -c%s "subor")
+if [ $SIZE -lt 100 ]; then
+  # → CORRUPTED
+fi
 ```
 
-**d) Pre PNG – pngcheck** (ak je dostupný):
+**Stupeň 2 – Typ obsahu:**
 ```bash
-pngcheck -v subor
+TYPE=$(file -b "subor")
+if [[ ! $TYPE =~ "image" ]]; then
+  # → CORRUPTED
+fi
 ```
 
-**Rozhodovacia logika:**
-- Všetky dostupné nástroje prešli → `valid/`
-- Niektoré prešli, niektoré zlyhali → `corrupted/` (potenciálne opraviteľný)
-- Všetky zlyhali alebo súbor je prázdny → `unrecoverable/`
+**Stupeň 3 – Technická čitateľnosť:**
 
-**3. Klasifikácia typu poškodenia pre corrupted súbory:**
-
-Pre každý súbor v `corrupted/` zaznamenajte typ a úroveň opraviteľnosti:
-
-| Typ | Úroveň | Popis |
-|-----|--------|-------|
-| truncated | L1 | Skrátený súbor, chýba EOI marker |
-| corrupt_segments | L2 | Poškodené dátové bloky |
-| unknown | L3 | Neurčený typ, manuálna inšpekcia |
-| corrupt_data | L4 | Poškodené pixelové dáta |
-| invalid_header | L5 | Poškodená hlavička – neopraviteľné |
-
-**4. Výpočet Integrity Score:**
-
-```
-Integrity Score = (počet valid súborov / celkový počet súborov) × 100 %
+JPEG:
+```bash
+jpeginfo -c "subor.jpg"
+# Exit 0 → VALID
+# Exit ≠ 0 → skontrolujte ImageMagick
+identify "subor.jpg" 2>&1
+# Úspech → REPAIRABLE (drobné chyby)
+# Zlyhanie → CORRUPTED
 ```
 
-**5. Zápis výsledkov a aktualizácia CoC:**
+PNG:
+```bash
+pngcheck "subor.png"
+# OK → VALID
+# Warnings → REPAIRABLE
+# Errors → CORRUPTED
+```
 
-Zapíšte výsledky do uzla `integrityValidation` v dokumentácii prípadu:
+TIFF:
+```bash
+tiffinfo "subor.tiff" >/dev/null 2>&1
+# Exit 0 → VALID
+# Exit ≠ 0 → CORRUPTED
+```
+
+RAW (CR2, NEF, ARW, atď.):
+```bash
+exiftool "subor.cr2" | grep -i "Image Size"
+# Rozpoznaný → VALID
+# Chyba → CORRUPTED (RAW súbory sú ťažko opraviteľné)
+```
+
+**4. Klasifikácia a organizácia:**
+
+- **VALID** → skopírujte do `${OUTPUT}/valid/`
+- **REPAIRABLE** → skopírujte do `${OUTPUT}/repairable/` (Step 12 ich skúsi opraviť)
+- **CORRUPTED** → skopírujte do `${OUTPUT}/corrupted/` (nepokračuje do opravy)
+
+**5. Generovanie štatistík:**
+
+Vytvorte súbor `VALIDATION_REPORT.txt`:
+```
+Celkový počet súborov: N
+VALID: X (Y%)
+REPAIRABLE: A (B%)
+CORRUPTED: C (D%)
+
+Formáty (VALID):
+  JPG: ...
+  PNG: ...
+  TIFF: ...
+  RAW: ...
+```
+
+**6. Zápis výsledkov a aktualizácia CoC:**
+
+Zapíšte výsledky validácie do dokumentácie prípadu:
 - Celkový počet validovaných súborov
-- Počet validných súborov
-- Počet poškodených súborov
-- Počet neopraviteľných súborov
-- Integrity score (%)
-- Použité nástroje
-- Zoznam `filesNeedingRepair` (corrupted súbory L1–L4 s typom poškodenia)
+- Počet VALID súborov
+- Počet REPAIRABLE súborov
+- Počet CORRUPTED súborov
+- Miera úspešnosti (%)
+- Štatistiky podľa formátu
 
-Pridajte záznam do poľa `chainOfCustody`:
+Pridajte záznam do Chain of Custody:
 ```json
 {
   "timestamp": "2025-01-26T16:00:00Z",
   "analyst": "Meno Analytika",
-  "action": "Validácia integrity dokončená – Integrity Score: 87 %, N poškodených súborov"
+  "action": "Validácia integrity dokončená – N VALID, M REPAIRABLE, K CORRUPTED"
 }
 ```
 
-**6. Archivácia výstupov:**
+**7. Archivácia výstupov:**
 
 Archivujte do dokumentácie prípadu:
-- `${CASE_ID}_validation_report.json` – kompletný validačný report
-- `${CASE_ID}_VALIDATION_REPORT.txt` – textový prehľad so zoznamom súborov na opravu
-
----
-
-> **Automatizácia (pripravuje sa):** Skript `ptintegrityvalidation` bude validáciu, klasifikáciu, zápis uzla `integrityValidation` a aktualizáciu CoC vykonávať automaticky.
+- `${CASE_ID}_validation_report.json` – detailné výsledky validácie
+- `VALIDATION_REPORT.txt` – textový prehľad pre klienta
 
 ## Výsledek
 
-Klasifikácia všetkých fotografií do troch kategórií v `${CASE_ID}_validation/`: `valid/`, `corrupted/`, `unrecoverable/`. Integrity score s rozpisom podľa formátu a zdroja. Výsledky zaznamenané v uzle `integrityValidation`. Workflow pokračuje do Kroku 11 (Rozhodnutie o oprave).
+Validované súbory organizované v `${CASE_ID}_consolidated/validation/`: podadresáre `valid/`, `repairable/`, `corrupted/`. Výsledky zaznamenané v dokumentácii prípadu. Workflow pokračuje do rozhodovania o oprave.
 
 ## Reference
 
-ISO/IEC 10918-1 – JPEG Standard
-PNG Specification – ISO/IEC 15948:2004
-NIST SP 800-86 – Section 3.1.3 (Data Validation)
+NIST SP 800-86 – Section 3.1.3 (Data Analysis)
+ISO/IEC 27037:2012 – Section 7.3 (Data quality assessment)
+ImageMagick Documentation (https://imagemagick.org/)
+LibJPEG / JPEGInfo Documentation
 
 ## Stav
 

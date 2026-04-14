@@ -2,7 +2,7 @@
 
 ## Úkol
 
-Odovzdať všetky výsledky klientovi, uzavrieť reťazec úschovy a finalizovať prípad.
+Odovzdať všetky výsledky klientovi, uzavrieť Chain of Custody a finalizovať prípad.
 
 ## Obtiažnosť
 
@@ -18,59 +18,83 @@ Nie
 
 ## Popis
 
-Odovzdanie klientovi je záverečný krok celého procesu obnovy fotografií. Zahŕňa prípravu záverečného balíka, kontaktovanie klienta, samotné odovzdanie, uzavretie reťazca úschovy a archiváciu prípadu.
+Odovzdanie klientovi je záverečný krok celého procesu obnovy fotografií. Zahŕňa prípravu záverečného balíka, kontaktovanie klienta, samotné odovzdanie, uzavretie Chain of Custody a archiváciu prípadu.
 
-Tento krok predstavuje zámerné ukončenie automatizácie. Fyzické odovzdanie dôkazového materiálu s overením totožnosti, získanie podpisov a uzavretie reťazca úschovy sú právne úkony vyžadujúce ľudskú zodpovednosť, ktoré nie je možné nahradiť softvérom.
+Fyzické odovzdanie dôkazového materiálu s overením totožnosti, získanie podpisov a uzavretie Chain of Custody sú právne úkony vyžadujúce ľudskú zodpovednosť – nie je ich možné nahradiť softvérom.
 
 ## Jak na to
 
 **1. Príprava záverečného balíka:**
 
-Skopíruj obnovené fotografie z adresárov `validation/valid/` a `repair/repaired/` (ak prebehla oprava), záverečnú správu `FINAL_REPORT.json`, `FINAL_REPORT.pdf` a `README.txt`. Vytvor súbor `MANIFEST.json` so zoznamom všetkých súborov a ich SHA-256 kontrolnými súčtami. Voliteľne skomprimuj celý balík do ZIP archívu.
+Skompletizujte nasledujúce súbory z dokumentácie prípadu:
+
+| Obsah | Zdroj |
+|-------|-------|
+| Obnovené fotografie | `{CASE_ID}_validation/valid/` |
+| Opravené fotografie (ak prebehla oprava) | `{CASE_ID}_repair/repaired/` |
+| Záverečná správa | `{CASE_ID}_final_report/FINAL_REPORT.json` + `.pdf` |
+| Pokyny pre klienta | `{CASE_ID}_final_report/README.txt` |
+| Kontrolný zoznam | `{CASE_ID}_final_report/delivery_checklist.json` |
+
+Ručne vytvorte `MANIFEST.json` so zoznamom všetkých odovzdávaných súborov a ich SHA-256 kontrolnými súčtami – klient ním môže kedykoľvek overiť integritu prijatých dát.
 
 **2. Kontaktovanie klienta:**
 
-Informuj klienta o výsledkoch: počet obnovených fotografií, hodnotenie kvality obnovy a možnosti odovzdania. Odpoveď sa očakáva do 24 hodín, opätovný kontakt po 3 dňoch bez reakcie.
+Informujte klienta o výsledkoch: počet obnovených fotografií, hodnotenie kvality obnovy a dohodnutý spôsob odovzdania. Pri nedostatočnej odpovedi kontaktujte znova po 3 dňoch.
 
 **3. Samotné odovzdanie:**
 
-Pri osobnom odovzdaní: over totožnosť klienta, odovzdaj balík aj pôvodné médium, vysvetli obsah záverečnej správy a získaj podpis odovzdávacieho protokolu. Pri kuriérskej preprave: dvojité balenie, poistenie zásielky, sledovanie, podpis pri prevzatí. Pri elektronickom odovzdaní: zabezpečený odkaz s heslom zaslaným samostatnou cestou, platnosť 7 dní, kontrolné súčty pre overenie integrity, pôvodné médium kuriérom.
+**Osobné odovzdanie:**
+- Overte totožnosť klienta (občiansky preukaz)
+- Odovzdajte záverečný balík aj pôvodné médium
+- Vysvetlite obsah záverečnej správy a `README.txt`
+- Získajte podpis odovzdávacieho protokolu
 
-**4. Uzavretie reťazca úschovy:**
+**Kuriérska preprava:**
+- Dvojité balenie, poistenie zásielky
+- Zaznamenajte číslo sledovania
+- Potvrďte prevzatie podpisom pri doručení
 
-Pridaj záverečný záznam „vrátené klientovi", získaj podpisy všetkých strán, over úplnosť záznamu bez medzier, nastav stav prípadu na `UZAVRETÝ`. Pôvodné médium je vrátené klientovi, forenzná kópia je archivovaná.
+**Elektronické odovzdanie:**
+- Zabezpečený odkaz s heslom zaslaným samostatnou cestou
+- Platnosť odkazu 7 dní
+- Klient overí integritu pomocou `MANIFEST.json`
+- Pôvodné médium odovzdajte kuriérom
 
-**5. Uzavretie prípadu:**
+**4. Uzavretie Chain of Custody:**
 
-Archivuj všetky súbory s retenčnou lehotou 7 rokov v zmysle GDPR čl. 30. Aktualizuj stav prípadu v databáze na `UZAVRETÝ` a zaznamenaj súhrn priebehu vrátane ponaučení pre budúce prípady.
+Pridajte záverečný záznam do `case.json`:
 
-**6. Vyplnenie uzla caseDelivery na Penterep:**
+```json
+{
+  "timestamp": "2025-01-26T18:30:00Z",
+  "analyst": "Meno Analytika",
+  "action": "Prípad uzavretý – balík odovzdaný klientovi, pôvodné médium vrátené, stav: CLOSED"
+}
+```
 
-Vyplňte formulár uzla `caseDelivery` nasledujúcimi údajmi:
-- Spôsob odovzdania – osobné odovzdanie / kuriér / elektronické odovzdanie
-- Odovzdané komu – meno klienta
-- Totožnosť overená – potvrďte po overení
-- Pôvodné médium vrátené – potvrďte po odovzdaní
-- Odovzdávací protokol podpísaný – potvrďte po podpise
-- Počet odovzdaných súborov
-- Retenčná lehota archivácie (roky) – štandardne 7
-- Stav prípadu – CLOSED
+Overte úplnosť záznamu – nesmú existovať časové medzery bez zodpovednej osoby. Nastavte stav prípadu na `CLOSED`.
 
-Pri elektronickom odovzdaní doplňte pole so zabezpečeným odkazom a dobou platnosti. Pri kuriérskej preprave doplňte číslo sledovania zásielky.
+**5. Archivácia prípadu:**
 
-**7. Archivácia výstupov:**
+Archivujte všetky súbory prípadu s retenčnou lehotou 7 rokov podľa GDPR čl. 30. Archivácia zahŕňa:
+- Forenzný obraz média (`{CASE_ID}.dd` + `.sha256`)
+- Všetky JSON výstupy jednotlivých krokov
+- Záverečnú správu a podpísaný odovzdávací protokol
+- `MANIFEST.json` s kontrolnými súčtami odovzdaného balíka
 
-Nahrajte nasledujúce súbory do záložky **Přílohy** projektu:
-- `MANIFEST.json` – zoznam všetkých odovzdaných súborov so SHA-256 súčtami
-- Odovzdávací protokol – naskenovaný podpísaný protokol
+**6. Záverečná kontrola:**
+
+Pred uzavretím overte:
+- Odovzdávací protokol podpísaný oboma stranami
+- Pôvodné médium vrátené klientovi
+- Chain of Custody bez medzier, stav `CLOSED`
+- Všetky súbory archivované s retenčnou lehotou 7 rokov
+- `MANIFEST.json` uložený v dokumentácii prípadu
 
 ## Výsledek
 
-Záverečný balík pre klienta obsahuje: obnovené fotografie, záverečnú technickú správu, pokyny pre klienta a súbor `MANIFEST.json` s SHA-256 kontrolnými súčtami všetkých odovzdaných súborov.
-
-Dokumentácia: informačný e-mail odoslaný, odovzdávací protokol podpísaný oboma stranami, reťazec úschovy má stav `UZAVRETÝ` bez medzier v zázname.
-
-Archivácia prípadu: všetky súbory archivované s retenčnou lehotou 7 rokov, stav v databáze `UZAVRETÝ`.
+Záverečný balík odovzdaný klientovi. Obsah: obnovené fotografie, záverečná technická správa, `README.txt` a `MANIFEST.json` so SHA-256 kontrolnými súčtami. Chain of Custody uzavretá so stavom `CLOSED`. Všetky súbory archivované s retenčnou lehotou 7 rokov podľa GDPR čl. 30.
 
 ## Reference
 

@@ -18,18 +18,18 @@ Jednoduchá
 
 ## Popis
 
-Tento krok zjednotí výstupy z krokov obnovy (Krok 8a a/alebo 8b) do jedného organizovaného datasetu pomocou SHA-256 deduplikácie naprieč zdrojmi a vytvorí master katalóg so štatistikami. Vykonáva sa vždy – pri `filesystem_scan` spracuje jeden zdroj, pri `hybrid` oba.
+Tento krok zjednotí výstupy z krokov obnovy (Filesystem Recovery a/alebo File Carving) do jedného organizovaného datasetu pomocou SHA-256 deduplikácie naprieč zdrojmi a vytvorí master katalóg so štatistikami. Vykonáva sa vždy – pri `filesystem_scan` spracuje jeden zdroj, pri `hybrid` oba.
 
 ## Jak na to
 
 **1. Overenie dostupných zdrojov:**
 
-Skontrolujte, ktoré výstupy z predchádzajúcich krokov existujú podľa stratégie z Kroku 7:
-- `filesystem_scan` → adresár `_recovered/` (Krok 8a)
-- `file_carving` → adresár `_carved/` (Krok 8b)
+Skontrolujte, ktoré výstupy z predchádzajúcich krokov existujú podľa stratégie z analýzy súborového systému:
+- `filesystem_scan` → adresár `_recovered/` (Filesystem Recovery)
+- `file_carving` → adresár `_carved/` (File Carving)
 - `hybrid` → oba adresáre
 
-Ak žiadny zdroj neexistuje, nekračujte – skontrolujte Kroky 8a/8b.
+Ak žiadny zdroj neexistuje, vráťte sa k Filesystem Recovery alebo File Carving.
 
 **2. Nastavenie premenných:**
 
@@ -85,14 +85,14 @@ Vytvorte aj textový report `CONSOLIDATION_REPORT.txt` s prehľadom štatistík.
 
 **7. Zápis výsledkov a aktualizácia CoC:**
 
-Zapíšte výsledky do uzla `recoveryConsolidation` v dokumentácii prípadu:
+Zapíšte výsledky konsolidácie do dokumentácie prípadu:
 - Počet súborov z filesystem recovery
 - Počet súborov z file carving
 - Počet odstránených duplikátov
 - Počet finálnych unikátnych súborov
 - Celková veľkosť datasetu (bajty)
 
-Pridajte záznam do poľa `chainOfCustody`:
+Pridajte záznam do Chain of Custody:
 ```json
 {
   "timestamp": "2025-01-26T15:30:00Z",
@@ -107,13 +107,9 @@ Archivujte do dokumentácie prípadu:
 - `master_catalog.json` – kompletný inventár všetkých súborov
 - `CONSOLIDATION_REPORT.txt` – textový prehľad pre klienta
 
----
-
-> **Automatizácia (pripravuje sa):** Skript `ptrecoveryconsolidation` bude celý proces deduplikácie, organizácie, zápis uzla `recoveryConsolidation` a aktualizáciu CoC vykonávať automaticky.
-
 ## Výsledek
 
-Konsolidovaný dataset v `${CASE_ID}_consolidated/`: podadresáre `fs_based/{jpg,png,tiff,raw,other}/` a `carved/{jpg,png,tiff,raw,other}/`, `duplicates/` pre auditné kópie. Výsledky zaznamenané v uzle `recoveryConsolidation`. Workflow pokračuje do Kroku 10 (Validácia integrity).
+Konsolidovaný dataset v `${CASE_ID}_consolidated/`: podadresáre `fs_based/{jpg,png,tiff,raw,other}/` a `carved/{jpg,png,tiff,raw,other}/`, `duplicates/` pre auditné kópie. Výsledky zaznamenané v dokumentácii prípadu. Workflow pokračuje do validácie integrity fotografií.
 
 ## Reference
 

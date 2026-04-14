@@ -2,11 +2,11 @@
 
 ## Úkol
 
-Vytvoriť záverečnú správu pre klienta aj technické detaily pre expertov.
+Vytvoriť záverečnú správu konsolidujúcu výstupy všetkých predchádzajúcich krokov.
 
 ## Obtiažnosť
 
-Stredná
+Jednoduchá
 
 ## Časová náročnosť
 
@@ -14,70 +14,111 @@ Stredná
 
 ## Automatický test
 
-Áno
+Nie
 
 ## Popis
 
-Záverečná správa konsoliduje výstupy všetkých predchádzajúcich krokov do jedného dokumentu. Načíta výsledky z uzlov `integrityValidation` (Krok 10), `exifAnalysis` (Krok 13) a voliteľne `photoRepair` (Krok 12), a zostaví 10-sekčnú správu. Výstupom je `FINAL_REPORT.json`, voliteľný `FINAL_REPORT.pdf` a `README.txt` pre klienta.
+Záverečná správa je generovaná platformou z priebežne budovanej dokumentácie prípadu. Každý krok workflowu do nej od začiatku prispieva svojimi výstupmi a CoC záznami – v tomto kroku je dokumentácia kompletná a správa sa z nej vygeneruje bez manuálneho dopĺňania.
 
 ## Jak na to
 
-**1. Spustenie skriptu:**
+**1. Kontrola úplnosti dokumentácie prípadu:**
 
-```bash
-ptfinalreport PHOTORECOVERY-2025-01-26-001
+Každý krok workflowu mal pridať svoje výstupy do dokumentácie prípadu. Pred generovaním správy overte, že sú prítomné záznamy zo všetkých povinných krokov:
+
+| Krok | Výstupný súbor | Povinné |
+|------|----------------|---------|
+| Prijatie žiadosti a vytvorenie Case ID | `case.json` (prvý záznam) | Áno |
+| Identifikácia média a fotodokumentácia | CoC záznam č. 2 | Áno |
+| Test čitateľnosti média | `{CASE_ID}_readability.json` | Áno |
+| Forenzný imaging + SHA-256 | `{CASE_ID}_imaging.json` | Áno |
+| Verifikácia SHA-256 hashu | `{CASE_ID}_verification.json` | Áno |
+| Analýza súborového systému | `{CASE_ID}_filesystem_analysis.json` | Áno |
+| Filesystem Recovery / File Carving | `{CASE_ID}_recovery_report.json` | Áno |
+| Recovery Consolidation | `{CASE_ID}_consolidation_report.json` | Áno |
+| Validácia integrity fotografií | `{CASE_ID}_validation_report.json` | Áno |
+| Rozhodnutie o oprave fotografií | `{CASE_ID}_repair_decision.json` | Áno |
+| Oprava fotografií | `{CASE_ID}_repair_report.json` | Nie |
+| EXIF analýza | `{CASE_ID}_exif_analysis/{CASE_ID}_exif_database.json` | Nie |
+
+**2. Štruktúra záverečnej správy:**
+
+Platforma zostaví správu z akumulovanej dokumentácie. Každá sekcia má presne definovaný zdroj:
+
+**S1 – Executive Summary**
+Z `validation_report.json` (počty, integrity score) + `exif_database.json` (EXIF pokrytie) + `repair_report.json` (opravené súbory). Celkový počet obnovených fotografií, quality rating, zoznam čo klient dostáva.
+
+**S2 – Case Information**
+Z `case.json` – Case ID, meno analytika, dátum prijatia žiadosti, klasifikácia dokumentu. Vyplnené v Prijatí žiadosti.
+
+**S3 – Evidence Information**
+Z `case.json` (fyzická identifikácia) + `readability.json` (stav média) + `imaging.json` (write-blocker, SHA-256). Vyplnené v Identifikácii média a Teste čitateľnosti.
+
+**S4 – Methodology**
+Generované automaticky podľa toho, ktoré kroky workflowu prebehli a ktoré nástroje boli použité (dc3dd/ddrescue, fls/icat, PhotoRec, ExifTool, PIL).
+
+**S5 – Timeline**
+Z timestampov CoC záznamov všetkých krokov – chronologický priebeh prípadu od prijatia po záverečný report.
+
+**S6 – Results**
+Z `validation_report.json` + `repair_report.json` + `exif_database.json` + `consolidation_report.json`. Počty súborov, integrity score, štatistiky opravy, EXIF pokrytie.
+
+**S7 – Technical Details**
+Z `filesystem_analysis.json` (FS typ, stratégia) + `validation_report.json` (validačná logika) + `repair_report.json` (techniky opravy) + `exif_database.json` (EXIF parametre).
+
+**S8 – Quality Assurance**
+Z `validation_report.json` (integrity score) + `exif_database.json` (EXIF quality score) + `verification.json` (SHA-256 zhoda).
+
+**S9 – Chain of Custody**
+Z CoC záznamov všetkých krokov – každý krok pridal svoj záznam do `case.json`. Kompletný neprerušený reťazec od prijatia média po záverečný report.
+
+**S10 – Signatures**
+Podpisový blok – `PENDING` do fyzického podpísania oboma stranami.
+
+**3. Peer review:**
+
+Nadriadený analytik skontroluje:
+- Konzistentnosť čísel naprieč sekciami S1, S6 a S8
+- Neprerušenosť Chain of Custody v S9
+- Správnosť technických detailov v S7
+- Vhodnosť jazyka pre prípadné súdne použitie
+
+**4. Podpisy:**
+
+Pred odovzdaním klientovi sú povinné podpisy primárneho analytika aj peer reviewera. Kým sú podpisy `PENDING`, správa nie je pripravená na odovzdanie.
+
+**5. Aktualizácia CoC:**
+
+Pridajte záverečný záznam do `case.json`:
+```json
+{
+  "timestamp": "2025-01-26T18:00:00Z",
+  "analyst": "Meno Analytika",
+  "action": "Záverečná správa vygenerovaná a podpísaná – pripravená na odovzdanie"
+}
 ```
-
-Skript načíta nasledujúce vstupy:
-- Uzol `integrityValidation` (Krok 10) – povinné
-- Uzol `exifAnalysis` (Krok 13) – voliteľné
-- Uzol `photoRepair` (Krok 12) – voliteľné
-
-Absencia voliteľných uzlov nespôsobí chybu – príslušné sekcie reportu sa jednoducho vynechajú.
-
-**2. Zostavenie 10-sekčnej správy:**
-
-Každá sekcia má dedikovanú metódu: zhrnutie pre klienta, informácie o prípade, informácie o dôkaze, metodológia, časový priebeh, výsledky, technické detaily, zabezpečenie kvality, reťazec úschovy, podpisy.
-
-**3. PDF správa (voliteľná):**
-
-Ak je nainštalovaný `reportlab`, vygeneruje dokument formátu A4 s titulnou stranou, tabuľkami a blokom podpisov. Bez `reportlab` sa krok preskočí.
-
-**4. Klientská dokumentácia:**
-
-`README.txt` s inštrukciami pre klienta a `delivery_checklist.json` so statusom položiek (peer review a podpisy sú PENDING).
-
-**5. Výsledky v uzle finalReport:**
-
-Skript automaticky zapíše výsledky do uzla `finalReport` na platforme. Skontrolujte, že uzol obsahuje správne hodnoty:
-- Celkový počet obnovených fotografií
-- Integrity score
-- Hodnotenie kvality – Very Good / Good / Fair / Poor
-- Počet vygenerovaných sekcií
-- PDF vygenerované – áno / nie
 
 **6. Archivácia výstupov:**
 
-Skript automaticky nahrá nasledujúce súbory do záložky **Přílohy** projektu:
-- `FINAL_REPORT.json` – kompletná záverečná správa (10 sekcií)
-- `FINAL_REPORT.pdf` – voliteľný, len ak je nainštalovaný reportlab
-- `README.txt` – inštrukcie pre klienta
-- `delivery_checklist.json` – zoznam položiek pred odovzdaním
+Archivujte do dokumentácie prípadu:
+- Záverečná správa (JSON + PDF)
+- Podpísaný odovzdávací protokol
+- Kontrolný zoznam s potvrdením všetkých položiek
 
 ## Výsledek
 
-Záverečná správa vygenerovaná a zaznamenaná v uzle `finalReport`. Kontrola nadriadeným analytikom a podpisy sú povinné pred odovzdaním. Workflow pokračuje do kroku Odovzdanie klientovi.
+Záverečná správa s 10 sekciami podpísaná oboma stranami a pripravená na odovzdanie klientovi. Workflow pokračuje na Odovzdanie zákazníkovi.
 
 ## Reference
 
-ISO/IEC 27037:2012 – Digital evidence handling
-NIST SP 800-86 – Forensic Techniques
-ACPO Good Practice Guide
-SWGDE Best Practices
+ISO/IEC 27037:2012 – Section 8 (Documentation and reporting)
+NIST SP 800-86 – Section 4 (Reporting Phase)
+ACPO Good Practice Guide – Principle 4 (Documentation)
+SWGDE Best Practices for Digital and Multimedia Evidence
 
 ## Stav
 
-K otestovaniu
+Manuálny proces – netestovateľný automaticky
 
 ## Nález
 
