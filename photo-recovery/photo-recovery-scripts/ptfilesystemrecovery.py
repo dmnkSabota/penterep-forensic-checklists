@@ -21,35 +21,27 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ._version import __version__
-
+from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
-# ---------------------------------------------------------------------------
-# CONSTANTS
-# ---------------------------------------------------------------------------
-
 SCRIPTNAME         = "ptfilesystemrecovery"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
-FLS_TIMEOUT        = 1800   # 30 min for large media
-ICAT_TIMEOUT       = 60     # per file
-EXIF_TIMEOUT       = 30     # per file
+FLS_TIMEOUT        = 1800
+ICAT_TIMEOUT       = 60
+EXIF_TIMEOUT       = 30
 
 IMAGE_EXTENSIONS: set = {
-    ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif",
-    ".heic", ".heif", ".webp",
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp",
+    ".tiff", ".tif", ".heic", ".heif", ".webp",
     ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
     ".dng", ".orf", ".raf", ".rw2", ".pef", ".raw",
 }
 
 FORMAT_GROUPS: Dict[str, List[str]] = {
-    "jpeg": [".jpg", ".jpeg"],
-    "png":  [".png"],
-    "tiff": [".tif", ".tiff"],
-    "bmp":  [".bmp"],
-    "gif":  [".gif"],
-    "heic": [".heic", ".heif"],
-    "webp": [".webp"],
+    "jpeg": [".jpg", ".jpeg"], "png":  [".png"],
+    "tiff": [".tif", ".tiff"], "bmp":  [".bmp"], "gif": [".gif"],
+    "heic": [".heic", ".heif"], "webp": [".webp"],
     "raw":  [".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
              ".dng", ".orf", ".raf", ".rw2", ".pef", ".raw"],
 }
@@ -57,19 +49,15 @@ FORMAT_GROUPS: Dict[str, List[str]] = {
 IMAGE_FILE_KEYWORDS = {"image", "jpeg", "png", "tiff", "gif", "bitmap",
                        "raw", "canon", "nikon", "exif", "riff webp"}
 
-# ---------------------------------------------------------------------------
-# MAIN CLASS
-# ---------------------------------------------------------------------------
+# Matches fls output lines: "r/r [* ]inode[-alloc]: path"
+_FLS_LINE = re.compile(r"^\S+\s+\*?\s*(\d+)(?:-\d+)?:\s+(.+)$")
 
-class PtFilesystemRecovery:
+
+class PtFilesystemRecovery(ForensicToolBase):
     """
-    Forensic filesystem-based photo recovery – ptlibs compliant.
-
-    Pipeline: load filesystem analysis JSON → check tools → scan (fls) →
-              extract (icat) + validate + EXIF → report.
-
-    READ-ONLY: never modifies the forensic image.
-    Compliant with ISO/IEC 27037:2012 and NIST SP 800-86.
+    Recovers image files from a forensic image using fls and icat (The Sleuth
+    Kit). Reads the filesystem analysis JSON from the previous step to obtain
+    the image path and partition layout. Read-only on the forensic image.
     """
 
     def __init__(self, args: argparse.Namespace) -> None:
@@ -90,7 +78,6 @@ class PtFilesystemRecovery:
         self.corrupted_dir = self.recovery_base / "corrupted"
         self.metadata_dir  = self.recovery_base / "metadata"
 
-        # All counters in one dict – avoids 8 separate attributes
         self._s: Dict[str, Any] = {
             "scanned": 0, "active": 0, "deleted": 0,
             "extracted": 0, "valid": 0, "corrupted": 0, "invalid": 0,
@@ -99,55 +86,16 @@ class PtFilesystemRecovery:
         self._recovered_files: List[Dict] = []
 
         self.ptjsonlib.add_properties({
-            "caseId": self.case_id,
+            "caseId":        self.case_id,
             "outputDirectory": str(self.output_dir),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp":     datetime.now(timezone.utc).isoformat(),
             "scriptVersion": __version__,
-            "method": "filesystem_scan",
-            "imagePath": None,
-            "partitionsProcessed": 0,
-            "totalFilesScanned": 0, "imageFilesFound": 0,
-            "activeImages": 0, "deletedImages": 0,
-            "imagesExtracted": 0, "validImages": 0,
-            "corruptedImages": 0, "invalidImages": 0,
-            "withExif": 0, "byFormat": {}, "successRate": None,
-            "recoveryBaseDir": str(self.recovery_base),
-            "dryRun": self.dry_run,
+            "dryRun":        self.dry_run,
         })
-        ptprint(f"Initialized: case={self.case_id}", "INFO", condition=not self.args.json)
 
-    # --- helpers ------------------------------------------------------------
-
-    def _add_node(self, node_type: str, success: bool, **kwargs) -> None:
-        self.ptjsonlib.add_node(self.ptjsonlib.create_node_object(
-            node_type, properties={"success": success, **kwargs}
-        ))
-
-    def _check_command(self, cmd: str) -> bool:
-        try:
-            subprocess.run(["which", cmd], capture_output=True, check=True, timeout=5)
-            return True
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return False
-
-    def _run_command(self, cmd: List[str], timeout: int = 300,
-                     binary: bool = False) -> Dict[str, Any]:
-        if self.dry_run:
-            ptprint(f"[DRY-RUN] {' '.join(str(c) for c in cmd)}",
-                    "INFO", condition=not self.args.json)
-            return {"success": True, "stdout": b"" if binary else "", "stderr": "", "returncode": 0}
-        try:
-            proc = subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
-            stdout = proc.stdout if binary else proc.stdout.decode(errors="replace").strip()
-            return {"success": proc.returncode == 0, "stdout": stdout,
-                    "stderr": proc.stderr.decode(errors="replace").strip(),
-                    "returncode": proc.returncode}
-        except subprocess.TimeoutExpired:
-            return {"success": False, "stdout": b"" if binary else "",
-                    "stderr": f"Timeout after {timeout}s", "returncode": -1}
-        except Exception as exc:
-            return {"success": False, "stdout": b"" if binary else "",
-                    "stderr": str(exc), "returncode": -1}
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def _format_group(self, ext: str) -> str:
         ext = ext.lower()
@@ -156,18 +104,13 @@ class PtFilesystemRecovery:
                 return group
         return ext.lstrip(".")
 
-    def _fail(self, node_type: str, msg: str) -> bool:
-        """Log error, add failure node, return False – reduces 3-line repetition."""
-        ptprint(msg, "ERROR", condition=not self.args.json)
-        self._add_node(node_type, False, error=msg)
-        return False
-
-    # --- phases -------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Phases
+    # ------------------------------------------------------------------
 
     def load_fs_analysis(self) -> bool:
-        """Load filesystem analysis JSON produced by ptfilesystemanalysis."""
-        ptprint("\n[1/3] Loading Filesystem Analysis",
-                "TITLE", condition=not self.args.json)
+        ptprint("\n[1/3] Loading filesystem analysis",
+                "TITLE", condition=self._out())
 
         f = self.output_dir / f"{self.case_id}_filesystem_analysis.json"
         if not f.exists():
@@ -178,17 +121,17 @@ class PtFilesystemRecovery:
         except Exception as exc:
             return self._fail("fsAnalysisLoad", f"Cannot read analysis file: {exc}")
 
-        # Normalise ptlibs JSON structure to flat dict
         if "result" in raw and "properties" in raw["result"]:
-            p = raw["result"]["properties"]
-            partitions: List[Dict] = next(
+            p          = raw["result"]["properties"]
+            partitions = next(
                 (n.get("properties", {}).get("partitions", [])
                  for n in raw["result"].get("nodes", [])
-                 if n.get("type") == "partitionAnalysis"),
-                []
-            )
-            self.fs_analysis = {"recommended_method": p.get("recommendedMethod"),
-                                "image_file": p.get("imagePath"), "partitions": partitions}
+                 if n.get("type") == "partitionAnalysis"), [])
+            self.fs_analysis = {
+                "recommended_method": p.get("recommendedMethod"),
+                "image_file":         p.get("imagePath"),
+                "partitions":         partitions,
+            }
         else:
             self.fs_analysis = raw
 
@@ -207,61 +150,56 @@ class PtFilesystemRecovery:
 
         if recommended == "file_carving" and not self.force:
             return self._fail("fsAnalysisLoad",
-                              "Filesystem analysis recommended file_carving – "
-                              "use File Carving or --force to override.")
-
+                              "Analysis recommends file_carving – "
+                              "use File Carving or pass --force to override.")
         if recommended == "hybrid":
-            ptprint("Hybrid strategy – filesystem scan will run; "
-                    "also run File Carving afterwards.",
-                    "WARNING", condition=not self.args.json)
+            ptprint("Hybrid strategy – also run File Carving after this step.",
+                    "WARNING", condition=self._out())
 
         partitions = self.fs_analysis.get("partitions", [])
-        ptprint(f"Loaded: method={recommended} | partitions={len(partitions)} | "
-                f"image={self.image_path.name}", "OK", condition=not self.args.json)
+        ptprint(f"Loaded: method={recommended}  |  "
+                f"partitions={len(partitions)}  |  "
+                f"image={self.image_path.name}",
+                "OK", condition=self._out())
         self.ptjsonlib.add_properties({"imagePath": str(self.image_path)})
         self._add_node("fsAnalysisLoad", True, recommendedMethod=recommended,
                        imagePath=str(self.image_path), partitionsFound=len(partitions))
         return True
 
     def check_tools(self) -> bool:
-        """Verify fls, icat, file, identify, exiftool are installed."""
-        ptprint("\n[2/3] Checking Required Tools", "TITLE", condition=not self.args.json)
-
-        tools = {"fls": "TSK file listing", "icat": "TSK inode extraction",
-                 "file": "file type detection", "identify": "ImageMagick validation",
-                 "exiftool": "EXIF extraction"}
+        ptprint("\n[2/3] Checking required tools", "TITLE", condition=self._out())
+        tools   = {"fls": "TSK file listing", "icat": "TSK inode extraction",
+                   "file": "file type detection", "identify": "ImageMagick validation",
+                   "exiftool": "EXIF extraction"}
         missing = []
         for t, desc in tools.items():
             found = self._check_command(t)
-            ptprint(f"  {'[OK]' if found else '[ERROR]'} {t}: {desc}",
-                    "OK" if found else "ERROR", condition=not self.args.json)
+            ptprint(f"  [{'OK' if found else 'ERROR'}] {t}: {desc}",
+                    "OK" if found else "ERROR", condition=self._out())
             if not found:
                 missing.append(t)
 
         if missing:
             ptprint(f"Missing: {', '.join(missing)} – "
                     "sudo apt-get install sleuthkit imagemagick libimage-exiftool-perl",
-                    "ERROR", condition=not self.args.json)
+                    "ERROR", condition=self._out())
             self._add_node("toolsCheck", False, missingTools=missing)
             return False
 
-        self._add_node("toolsCheck", True, toolsChecked=list(tools.keys()))
+        self._add_node("toolsCheck", True, toolsChecked=list(tools))
         return True
 
     def scan_and_filter(self, partition: Dict) -> Tuple[List[Dict], List[Dict]]:
-        """
-        Run fls on one partition and return (active_images, deleted_images).
-        Merges scan + filter into one pass – avoids storing the full entries list.
-        """
         offset   = partition.get("offset", 0)
         part_num = partition.get("number", 0)
-        ptprint(f"  [fls] partition {part_num} (offset={offset}) …",
-                "INFO", condition=not self.args.json)
+        ptprint(f"  fls: partition {part_num} (offset={offset}) …",
+                "INFO", condition=self._out())
 
-        r = self._run_command(["fls", "-r", "-d", "-p", "-o", str(offset),
-                               str(self.image_path)], timeout=FLS_TIMEOUT)
+        r = self._run_command(
+            ["fls", "-r", "-d", "-p", "-o", str(offset), str(self.image_path)],
+            timeout=FLS_TIMEOUT)
         if not r["success"]:
-            ptprint(f"  fls failed: {r['stderr']}", "ERROR", condition=not self.args.json)
+            ptprint(f"  fls failed: {r['stderr']}", "ERROR", condition=self._out())
             return [], []
 
         active, deleted = [], []
@@ -271,40 +209,37 @@ class PtFilesystemRecovery:
                 continue
             self._s["scanned"] += 1
 
-            inode_m = re.search(r"(\d+):", line)
-            path_m  = re.search(r":\s+(.+)$", line)
-            if not inode_m or not path_m:
+            # Parse "type  [* ]inode[-alloc]: filepath"
+            m = _FLS_LINE.match(line)
+            if not m:
                 continue
 
-            filepath = path_m.group(1).strip()
+            inode    = int(m.group(1))
+            filepath = m.group(2).strip()
             ext      = Path(filepath).suffix.lower()
             if ext not in IMAGE_EXTENSIONS:
                 continue
 
-            is_deleted = "*" in line.split(":")[0]
-            group = self._format_group(ext)
+            is_deleted = line.split(":")[0].count("*") > 0
+            group      = self._format_group(ext)
             self._s["by_format"][group] = self._s["by_format"].get(group, 0) + 1
 
-            entry = {"inode": int(inode_m.group(1)), "path": filepath,
+            entry = {"inode": inode, "path": filepath,
                      "filename": Path(filepath).name, "deleted": is_deleted}
-            if is_deleted:
-                deleted.append(entry); self._s["deleted"] += 1
-            else:
-                active.append(entry);  self._s["active"]  += 1
+            if is_deleted: deleted.append(entry); self._s["deleted"] += 1
+            else:          active.append(entry);  self._s["active"]  += 1
 
-        ptprint(f"  Images: {len(active) + len(deleted)} "
+        ptprint(f"  Images: {len(active) + len(deleted)}  "
                 f"(active={len(active)}, deleted={len(deleted)})",
-                "OK", condition=not self.args.json)
+                "OK", condition=self._out())
         return active, deleted
 
     def _extract_single(self, entry: Dict, offset: int, out_base: Path) -> Optional[Path]:
-        """Extract one file via icat, preserving directory structure."""
         dest = out_base / entry["path"].lstrip("/")
         dest.parent.mkdir(parents=True, exist_ok=True)
         cmd = ["icat", "-o", str(offset), str(self.image_path), str(entry["inode"])]
 
         if self.dry_run:
-            self._run_command(cmd)
             return dest
         try:
             with open(dest, "wb") as fh:
@@ -314,19 +249,15 @@ class PtFilesystemRecovery:
                 return dest
             ptprint(f"    icat {entry['inode']}: "
                     f"{proc.stderr.decode(errors='replace').strip()}",
-                    "WARNING", condition=not self.args.json)
+                    "WARNING", condition=self._out())
         except Exception as exc:
             ptprint(f"    icat {entry['inode']}: {exc}",
-                    "WARNING", condition=not self.args.json)
+                    "WARNING", condition=self._out())
         if dest.exists():
             dest.unlink()
         return None
 
     def _validate_image(self, filepath: Path) -> Tuple[str, Dict]:
-        """
-        Three-stage validation: size → file command → identify.
-        Returns (status, info).  status ∈ {valid, corrupted, invalid}
-        """
         info: Dict = {"size": 0, "imageFormat": None, "dimensions": None}
         try:
             info["size"] = filepath.stat().st_size
@@ -352,10 +283,11 @@ class PtFilesystemRecovery:
         return ("corrupted" if info["size"] > 1024 else "invalid"), info
 
     def _extract_metadata(self, filepath: Path, entry: Dict) -> Dict:
-        """Extract FS timestamps and EXIF for one recovered file."""
-        meta: Dict = {"filename": filepath.name, "originalPath": entry["path"],
-                      "inode": entry["inode"], "deleted": entry["deleted"],
-                      "fsMetadata": {}, "exifMetadata": {}, "hasExif": False}
+        meta: Dict = {
+            "filename": filepath.name, "originalPath": entry["path"],
+            "inode": entry["inode"], "deleted": entry["deleted"],
+            "fsMetadata": {}, "exifMetadata": {}, "hasExif": False,
+        }
         try:
             st = filepath.stat()
             meta["fsMetadata"] = {
@@ -370,15 +302,16 @@ class PtFilesystemRecovery:
         except Exception as exc:
             meta["fsMetadata"]["error"] = str(exc)
 
-        r = self._run_command(["exiftool", "-json", "-charset", "utf8", str(filepath)],
-                              timeout=EXIF_TIMEOUT)
+        r = self._run_command(
+            ["exiftool", "-json", "-charset", "utf8", str(filepath)],
+            timeout=EXIF_TIMEOUT)
         if r["success"]:
             try:
                 data = json.loads(r["stdout"])
                 if data:
                     meta["exifMetadata"] = data[0]
-                    if ({"DateTimeOriginal", "CreateDate", "GPSLatitude", "Make", "Model"}
-                            & set(data[0])):
+                    if ({"DateTimeOriginal", "CreateDate", "GPSLatitude",
+                         "Make", "Model"} & set(data[0])):
                         meta["hasExif"] = True
                         self._s["exif"] += 1
             except Exception as exc:
@@ -386,28 +319,28 @@ class PtFilesystemRecovery:
         return meta
 
     def process_partition(self, partition: Dict) -> None:
-        """Scan → extract → validate → metadata pipeline for one partition."""
         part_num = partition.get("number", 0)
         offset   = partition.get("offset", 0)
         ptprint(f"\n  Partition {part_num} (offset={offset})",
-                "TITLE", condition=not self.args.json)
+                "TITLE", condition=self._out())
 
         active_imgs, deleted_imgs = self.scan_and_filter(partition)
         all_targets = ([(e, self.active_dir,  "active")  for e in active_imgs] +
                        [(e, self.deleted_dir, "deleted") for e in deleted_imgs])
+
         if not all_targets:
-            ptprint("  No image files found.", "WARNING", condition=not self.args.json)
+            ptprint("  No image files found.", "WARNING", condition=self._out())
             return
 
         total = len(all_targets)
-        ptprint(f"  Extracting {total} image files …", "INFO", condition=not self.args.json)
-        self._add_node("partitionRecovery", True, partitionNumber=part_num,
-                       offset=offset, totalImages=total)
+        ptprint(f"  Extracting {total} image files …", "INFO", condition=self._out())
+        self._add_node("partitionRecovery", True,
+                       partitionNumber=part_num, offset=offset, totalImages=total)
 
         for idx, (entry, out_base, label) in enumerate(all_targets, 1):
             if idx % 50 == 0 or idx == total:
-                ptprint(f"    {idx}/{total} ({idx*100//total}%)",
-                        "INFO", condition=not self.args.json)
+                ptprint(f"    {idx}/{total} ({idx * 100 // total}%)",
+                        "INFO", condition=self._out())
 
             extracted = self._extract_single(entry, offset, out_base)
             if extracted is None:
@@ -421,7 +354,8 @@ class PtFilesystemRecovery:
                 meta = self._extract_metadata(extracted, entry)
                 if not self.dry_run:
                     (self.metadata_dir / f"{extracted.name}_metadata.json").write_text(
-                        json.dumps(meta, indent=2, ensure_ascii=False, default=str), "utf-8")
+                        json.dumps(meta, indent=2, ensure_ascii=False, default=str),
+                        encoding="utf-8")
                 self._recovered_files.append({
                     "filename":      extracted.name,
                     "originalPath":  entry["path"],
@@ -436,24 +370,26 @@ class PtFilesystemRecovery:
             elif status == "corrupted":
                 self._s["corrupted"] += 1
                 if not self.dry_run:
-                    shutil.move(str(extracted), str(self.corrupted_dir / extracted.name))
+                    shutil.move(str(extracted),
+                                str(self.corrupted_dir / extracted.name))
             else:
                 self._s["invalid"] += 1
                 if not self.dry_run and extracted.exists():
                     extracted.unlink()
 
-        ptprint(f"  Partition {part_num} done.", "OK", condition=not self.args.json)
+        ptprint(f"  Partition {part_num} done.", "OK", condition=self._out())
 
-    # --- run & save ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Run and save
+    # ------------------------------------------------------------------
 
     def run(self) -> None:
-        """Orchestrate the full recovery pipeline."""
-        ptprint("=" * 70, "TITLE", condition=not self.args.json)
-        ptprint(f"FILESYSTEM-BASED PHOTO RECOVERY v{__version__} | Case: {self.case_id}",
-                "TITLE", condition=not self.args.json)
+        ptprint("=" * 70, "TITLE", condition=self._out())
+        ptprint(f"FILESYSTEM-BASED PHOTO RECOVERY v{__version__}  |  "
+                f"Case: {self.case_id}", "TITLE", condition=self._out())
         if self.dry_run:
-            ptprint("MODE: DRY-RUN", "WARNING", condition=not self.args.json)
-        ptprint("=" * 70, "TITLE", condition=not self.args.json)
+            ptprint("MODE: DRY-RUN", "WARNING", condition=self._out())
+        ptprint("=" * 70, "TITLE", condition=self._out())
 
         if not self.load_fs_analysis():
             self.ptjsonlib.set_status("finished"); return
@@ -464,18 +400,20 @@ class PtFilesystemRecovery:
                      self.corrupted_dir, self.metadata_dir):
             if not self.dry_run:
                 path.mkdir(parents=True, exist_ok=True)
-        ptprint("[3/3] Output directories ready.", "OK", condition=not self.args.json)
+        ptprint("[3/3] Output directories ready.", "OK", condition=self._out())
 
         partitions = self.fs_analysis.get("partitions", [])
         for partition in partitions:
             self.process_partition(partition)
 
-        s = self._s
+        s            = self._s
         total_images = s["active"] + s["deleted"]
         success_rate = (round(s["valid"] / s["extracted"] * 100, 1)
                         if s["extracted"] else None)
 
         self.ptjsonlib.add_properties({
+            "compliance":          ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+            "method":              "filesystem_scan",
             "partitionsProcessed": len(partitions),
             "totalFilesScanned":   s["scanned"],
             "imageFilesFound":     total_images,
@@ -488,70 +426,78 @@ class PtFilesystemRecovery:
             "withExif":            s["exif"],
             "byFormat":            s["by_format"],
             "successRate":         success_rate,
+            "recoveryBaseDir":     str(self.recovery_base),
         })
         self._add_node("recoverySummary", True,
                        imageFilesFound=total_images, imagesExtracted=s["extracted"],
                        validImages=s["valid"], corruptedImages=s["corrupted"],
                        withExif=s["exif"], byFormat=s["by_format"],
                        successRate=success_rate)
+        self.ptjsonlib.add_node(self.ptjsonlib.create_node_object(
+            "chainOfCustodyEntry",
+            properties={
+                "action":    (f"Filesystem-based photo recovery complete – "
+                              f"{s['valid']} valid files recovered"),
+                "result":    "SUCCESS" if s["valid"] > 0 else "NO_FILES",
+                "analyst":   self.args.analyst,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        ))
 
-        ptprint("\n" + "=" * 70, "TITLE", condition=not self.args.json)
-        ptprint("RECOVERY COMPLETED", "OK", condition=not self.args.json)
-        ptprint(f"Images: {total_images} (active={s['active']}, deleted={s['deleted']}) | "
-                f"Valid: {s['valid']} | Corrupted: {s['corrupted']} | "
-                f"Invalid: {s['invalid']}",
-                "INFO", condition=not self.args.json)
+        ptprint("\n" + "=" * 70, "TITLE", condition=self._out())
+        ptprint("RECOVERY COMPLETE", "OK", condition=self._out())
+        ptprint(f"Images: {total_images} (active={s['active']}, "
+                f"deleted={s['deleted']})  |  Valid: {s['valid']}  |  "
+                f"Corrupted: {s['corrupted']}  |  Invalid: {s['invalid']}",
+                "INFO", condition=self._out())
         if success_rate is not None:
-            ptprint(f"Success rate: {success_rate}%", "OK", condition=not self.args.json)
-        ptprint("Next: Photo Cataloging",
-                "INFO", condition=not self.args.json)
-        ptprint("=" * 70, "TITLE", condition=not self.args.json)
+            ptprint(f"Success rate: {success_rate}%", "OK", condition=self._out())
+        ptprint("Next: Photo Cataloging", "INFO", condition=self._out())
+        ptprint("=" * 70, "TITLE", condition=self._out())
         self.ptjsonlib.set_status("finished")
 
     def _write_text_report(self, props: Dict) -> Path:
-        """Write RECOVERY_REPORT.txt to recovery_base."""
         txt = self.recovery_base / "RECOVERY_REPORT.txt"
         self.recovery_base.mkdir(parents=True, exist_ok=True)
-        sep = "=" * 70
+        sep   = "=" * 70
         lines = [sep, "FILESYSTEM-BASED PHOTO RECOVERY REPORT", sep, "",
                  f"Case ID:   {self.case_id}",
-                 f"Timestamp: {props.get('timestamp','')}",
-                 f"Method:    {props.get('method','filesystem_scan')}", "",
+                 f"Timestamp: {props.get('timestamp', '')}",
+                 f"Method:    {props.get('method', 'filesystem_scan')}", "",
                  "STATISTICS:",
-                 f"  Images found:   {props.get('imageFilesFound',0)} "
-                 f"(active={props.get('activeImages',0)}, "
-                 f"deleted={props.get('deletedImages',0)})",
-                 f"  Extracted:      {props.get('imagesExtracted',0)}",
-                 f"  Valid:          {props.get('validImages',0)}",
-                 f"  Corrupted:      {props.get('corruptedImages',0)}",
-                 f"  With EXIF:      {props.get('withExif',0)}",
+                 f"  Images found:   {props.get('imageFilesFound', 0)} "
+                 f"(active={props.get('activeImages', 0)}, "
+                 f"deleted={props.get('deletedImages', 0)})",
+                 f"  Extracted:      {props.get('imagesExtracted', 0)}",
+                 f"  Valid:          {props.get('validImages', 0)}",
+                 f"  Corrupted:      {props.get('corruptedImages', 0)}",
+                 f"  With EXIF:      {props.get('withExif', 0)}",
                  *([] if props.get("successRate") is None
                    else [f"  Success rate:   {props['successRate']}%"]),
                  "", "BY FORMAT:"]
         lines += [f"  {k.upper():8s}: {v}"
                   for k, v in sorted(props.get("byFormat", {}).items())]
         lines += ["", sep,
-                  f"RECOVERED FILES (first 100 of {len(self._recovered_files)}):", sep, ""]
+                  f"RECOVERED FILES (first 100 of {len(self._recovered_files)}):",
+                  sep, ""]
         for rec in self._recovered_files[:100]:
-            dim = f" | {rec['dimensions']}" if rec.get("dimensions") else ""
+            dim = f"  |  {rec['dimensions']}" if rec.get("dimensions") else ""
             lines += [rec["filename"],
                       f"  {rec['originalPath']}  →  {rec['recoveredPath']}",
-                      f"  {rec['sizeBytes']} B{dim} | "
-                      f"EXIF: {'Yes' if rec.get('hasExif') else 'No'}",
-                      ""]
+                      f"  {rec['sizeBytes']} B{dim}  |  "
+                      f"EXIF: {'Yes' if rec.get('hasExif') else 'No'}", ""]
         if len(self._recovered_files) > 100:
             lines.append(f"… and {len(self._recovered_files) - 100} more files")
         txt.write_text("\n".join(lines), encoding="utf-8")
         return txt
 
     def save_report(self) -> Optional[str]:
-        """Save JSON report and RECOVERY_REPORT.txt."""
         if self.args.json:
             ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
             return None
 
         json_file = self.output_dir / f"{self.case_id}_recovery_report.json"
-        report = {
+        report    = {
             "result": json.loads(self.ptjsonlib.get_result_json()),
             "recoveredFiles": self._recovered_files,
             "outputDirectories": {
@@ -564,11 +510,11 @@ class PtFilesystemRecovery:
         json_file.write_text(
             json.dumps(report, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
-        ptprint(f"JSON report: {json_file}", "OK", condition=not self.args.json)
+        ptprint(f"JSON report: {json_file}", "OK", condition=self._out())
 
         props = json.loads(self.ptjsonlib.get_result_json())["result"]["properties"]
-        txt = self._write_text_report(props)
-        ptprint(f"Text report: {txt}", "OK", condition=not self.args.json)
+        txt   = self._write_text_report(props)
+        ptprint(f"Text report: {txt}", "OK", condition=self._out())
         return str(json_file)
 
 
@@ -580,33 +526,31 @@ def get_help() -> List[Dict]:
     return [
         {"description": [
             "Forensic filesystem-based photo recovery – ptlibs compliant",
-            "Recovers images via fls + icat; preserves filenames, structure, EXIF",
+            "Recovers images via fls + icat, preserving filenames, paths, and EXIF",
             "Compliant with ISO/IEC 27037:2012 and NIST SP 800-86",
         ]},
         {"usage": ["ptfilesystemrecovery <case-id> [options]"]},
         {"usage_example": [
             "ptfilesystemrecovery PHOTORECOVERY-2025-01-26-001",
-            "ptfilesystemrecovery PHOTORECOVERY-2025-01-26-001 --json",
             "ptfilesystemrecovery PHOTORECOVERY-2025-01-26-001 --dry-run",
             "ptfilesystemrecovery PHOTORECOVERY-2025-01-26-001 --force",
         ]},
         {"options": [
             ["case-id",            "",      "Forensic case identifier – REQUIRED"],
+            ["-a", "--analyst",    "<n>",   "Analyst name (default: Analyst)"],
             ["-o", "--output-dir", "<dir>", f"Output directory (default: {DEFAULT_OUTPUT_DIR})"],
-            ["-v", "--verbose",    "",      "Verbose logging"],
             ["--dry-run",          "",      "Simulate without running external commands"],
-            ["--force",            "",      "Override file_carving recommendation from analysis"],
-            ["-j", "--json",       "",      "JSON output for Penterep platform"],
-            ["-q", "--quiet",      "",      "Suppress progress output"],
+            ["--force",            "",      "Override file_carving recommendation"],
+            ["-j", "--json",       "",      "JSON output for platform integration"],
+            ["-q", "--quiet",      "",      "Suppress terminal output"],
             ["-h", "--help",       "",      "Show help"],
             ["--version",          "",      "Show version"],
         ]},
         {"notes": [
-            "Pipeline: load analysis JSON → tools → fls scan → icat+validate+EXIF → report",
-            "Output:   active/ | deleted/ | corrupted/ | metadata/ | RECOVERY_REPORT.txt",
-            "READ-ONLY: never modifies the forensic image",
-            "Requires Filesystem Analysis results ({case_id}_filesystem_analysis.json)",
-            "Complies with ISO/IEC 27037:2012 and NIST SP 800-86",
+            "Requires: fls, icat (sleuthkit) + identify (imagemagick) + exiftool",
+            "Output: active/ | deleted/ | corrupted/ | metadata/ | RECOVERY_REPORT.txt",
+            "Reads {case_id}_filesystem_analysis.json from the previous step",
+            "Compliant with ISO/IEC 27037:2012 and NIST SP 800-86",
         ]},
     ]
 
@@ -614,16 +558,14 @@ def get_help() -> List[Dict]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("case_id")
+    parser.add_argument("-a", "--analyst",    default="Analyst")
     parser.add_argument("-o", "--output-dir", default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("-v", "--verbose",    action="store_true")
     parser.add_argument("-q", "--quiet",      action="store_true")
     parser.add_argument("--dry-run",          action="store_true")
     parser.add_argument("--force",            action="store_true")
     parser.add_argument("-j", "--json",       action="store_true")
-    parser.add_argument("--version", action="version", version=f"{SCRIPTNAME} {__version__}")
-    parser.add_argument("--socket-address",   default=None)
-    parser.add_argument("--socket-port",      default=None)
-    parser.add_argument("--process-ident",    default=None)
+    parser.add_argument("--version", action="version",
+                        version=f"{SCRIPTNAME} {__version__}")
 
     if len(sys.argv) == 1 or {"-h", "--help"} & set(sys.argv):
         ptprinthelper.help_print(get_help(), SCRIPTNAME, __version__)
