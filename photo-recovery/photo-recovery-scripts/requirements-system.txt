@@ -1,0 +1,63 @@
+# photo-recovery-scripts — system tool dependencies
+# Install with: sudo apt-get install <package>
+#
+# Required tools are listed per pipeline step.
+# Optional tools degrade gracefully: the script prints a warning and
+# continues without the feature rather than aborting.
+#
+# Tested on Ubuntu 22.04 LTS / Debian 12.
+
+# ── Step 03 · ptmediareadability ─────────────────────────────────────────────
+util-linux          # lsblk, blockdev  (usually pre-installed)
+e2fsprogs           # blkid            (usually pre-installed)
+smartmontools       # smartctl
+hdparm              # hdparm
+mdadm               # mdadm  (optional — RAID detection only)
+
+# ── Step 05 · ptforensicimaging ──────────────────────────────────────────────
+dc3dd               # dc3dd  (READABLE media imaging)
+gddrescue           # ddrescue  (PARTIAL/damaged media imaging)
+coreutils           # sha256sum  (usually pre-installed)
+
+# ── Step 06 · ptimageverification ────────────────────────────────────────────
+# No additional system tools required.
+# E01 image support (optional):
+# libewf-tools       # ewfverify
+
+# ── Step 07 · ptfilesystemanalysis ───────────────────────────────────────────
+sleuthkit           # mmls, fsstat, fls
+
+# ── Step 08a · ptfilesystemrecovery ──────────────────────────────────────────
+sleuthkit           # fls, icat
+imagemagick         # identify  (image validation)
+libimage-exiftool-perl  # exiftool  (EXIF extraction)
+
+# ── Step 08b · ptfilecarving ─────────────────────────────────────────────────
+testdisk            # photorec  (file carving engine)
+imagemagick         # identify  (post-carving validation)
+libimage-exiftool-perl  # exiftool
+
+# ── Step 09 · ptrecoveryconsolidation ────────────────────────────────────────
+# No additional system tools required.
+
+# ── Step 10 · ptintegrityvalidation ──────────────────────────────────────────
+imagemagick         # identify  (generic image validation)
+jpeginfo            # jpeginfo  (JPEG-specific validation, optional)
+pngcheck            # pngcheck  (PNG-specific validation, optional)
+libtiff-tools       # tiffinfo  (TIFF-specific validation, optional)
+libimage-exiftool-perl  # exiftool  (RAW format validation, optional)
+
+# ── Step 11 · ptrepairdecision ───────────────────────────────────────────────
+# No additional system tools required.
+
+# ── Step 12 · ptphotorepair ──────────────────────────────────────────────────
+jpeginfo            # jpeginfo  (post-repair validation, optional)
+# Pillow is the primary repair engine — see requirements.txt
+
+# ── Step 13 · ptexifanalysis ─────────────────────────────────────────────────
+libimage-exiftool-perl  # exiftool  (REQUIRED — EXIF batch extraction)
+
+# ── One-liner: install all at once ───────────────────────────────────────────
+# sudo apt-get install util-linux e2fsprogs smartmontools hdparm mdadm \
+#   dc3dd gddrescue sleuthkit imagemagick libimage-exiftool-perl \
+#   testdisk jpeginfo pngcheck libtiff-tools

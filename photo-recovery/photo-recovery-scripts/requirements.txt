@@ -1,1 +1,8 @@
+# photo-recovery-scripts — Python dependencies
+# Install with: pip install -r requirements.txt
+
+# Penterep platform libraries (JSON output, terminal helpers)
 ptlibs>=1.0.25,<2
+
+# JPEG repair in ptphotorepair
+Pillow>=9.0

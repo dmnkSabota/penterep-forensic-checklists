@@ -444,6 +444,7 @@ class PtMediaReadability(ForensicToolBase):
         if not self.pre_detect() and not self.dry_run:
             self.media_status, self.recommended_tool, self.next_step = (
                 "UNREADABLE", "Physical repair required", 4)
+            self.classify()          # record readabilityClassification node
         else:
             self.tests()
             self.classify()
