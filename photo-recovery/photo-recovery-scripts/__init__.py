@@ -1,2 +1,2 @@
 # photo-recovery-scripts — forensic photo recovery toolkit
-# Bc. Dominik Sabota, VUT FIT Brno, 2025
+# Bc. Dominik Sabota, VUT FEKT Brno, 2026

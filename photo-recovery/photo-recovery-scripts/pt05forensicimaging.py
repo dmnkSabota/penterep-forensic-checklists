@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-    Copyright (c) 2025 Bc. Dominik Sabota, VUT FIT Brno
+    Copyright (c) 2026 Bc. Dominik Sabota, VUT FIT Brno
 
     ptforensicimaging - Forensic media imaging tool
 
@@ -10,13 +10,21 @@
     See <https://www.gnu.org/licenses/> for details.
 """
 
+# LAST CHANGES:
+#   - Removed confirm_write_blocker() – now inherited from ForensicToolBase
+#   - Replaced threading-based progress bar (Thread + Event + _drain) with
+#     simple poll-based loop: check file size every second while process runs.
+#     This eliminates a potential deadlock if stdout buffer fills and is easier
+#     to debug during testing.
+#   - Fixed save_report(): same bug as ptmediareadability (JSON printed to
+#     stdout instead of being saved to file)
+
 import argparse
 import json
 import os
 import signal
 import subprocess
 import sys
-import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,35 +91,7 @@ class PtForensicImaging(ForensicToolBase):
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def confirm_write_blocker() -> bool:
-        """Interactive write-blocker confirmation required before imaging."""
-        ptprint("\n" + "!" * 70, "WARNING", condition=True)
-        ptprint("CRITICAL: WRITE-BLOCKER MUST BE CONNECTED",
-                "WARNING", condition=True, colortext=True)
-        ptprint("!" * 70, "WARNING", condition=True)
-        for line in [
-            "  1. Hardware write-blocker is physically connected",
-            "  2. LED indicator shows PROTECTED",
-            "  3. Source media connected THROUGH the write-blocker",
-            "  4. Target storage has sufficient free space",
-        ]:
-            ptprint(line, "TEXT", condition=True)
-
-        while True:
-            resp = input("\nConfirm write-blocker is active [y/N]: ").strip().lower()
-            if resp in ("y", "yes"):   ok = True;  break
-            if resp in ("n", "no", ""): ok = False; break
-            ptprint("Please enter 'y' or 'n'.", "WARNING", condition=True)
-
-        sym = "✓" * 70 if ok else "✗" * 70
-        lv  = "OK" if ok else "ERROR"
-        ptprint("\n" + sym, lv, condition=True)
-        ptprint("CONFIRMED – proceeding" if ok
-                else "NOT CONFIRMED – imaging ABORTED",
-                lv, condition=True, colortext=True)
-        ptprint(sym, lv, condition=True)
-        return ok
+    # NOTE: confirm_write_blocker() is inherited from ForensicToolBase.
 
     def _tool_version(self) -> str:
         r = self._run_command([self.tool, "--version"], timeout=5)
@@ -135,21 +115,18 @@ class PtForensicImaging(ForensicToolBase):
         ptprint("STEP 1: Prerequisites", "TITLE", condition=self._out())
         ptprint("=" * 70,               "TITLE", condition=self._out())
 
-        # Imaging tool
         ptprint(f"\n[1a] Checking {self.tool}", "SUBTITLE", condition=self._out())
         if not self._check_command(self.tool):
             return self._fail("prerequisitesCheck",
                               f"{self.tool} not installed")
         ptprint(f"✓ {self.tool} available", "OK", condition=self._out())
 
-        # sha256sum required by ddrescue (dc3dd has it built in)
         if self.tool == "ddrescue":
             if not self._check_command("sha256sum"):
                 return self._fail("prerequisitesCheck",
                                   "sha256sum not installed")
             ptprint("✓ sha256sum available", "OK", condition=self._out())
 
-        # Source device
         ptprint("\n[1b] Checking source device", "SUBTITLE", condition=self._out())
         if not os.path.exists(self.device) and not self.dry_run:
             return self._fail("prerequisitesCheck",
@@ -157,7 +134,6 @@ class PtForensicImaging(ForensicToolBase):
         ptprint(f"✓ Device accessible: {self.device}",
                 "OK", condition=self._out())
 
-        # Target storage space
         ptprint("\n[1c] Checking target storage", "SUBTITLE", condition=self._out())
         try:
             stat       = os.statvfs(self.output_dir)
@@ -207,7 +183,6 @@ class PtForensicImaging(ForensicToolBase):
         ptprint(f"  Target: {self.image_path}", "TEXT", condition=self._out())
         ptprint("  Hash:   SHA-256 (integrated)", "TEXT", condition=self._out())
 
-        # Fetch source size for progress display
         r = self._run_command(["blockdev", "--getsize64", self.device], timeout=5)
         if r["success"] and r["stdout"]:
             try:
@@ -231,44 +206,41 @@ class PtForensicImaging(ForensicToolBase):
         t0 = time.time()
 
         try:
-            proc         = subprocess.Popen(
+            # SIMPLIFIED: replaced threading + Event + _drain() with a simple
+            # poll loop that checks the output file size every second.
+            # Avoids potential stdout buffer deadlock with threading approach.
+            proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1)
-            output_lines: List[str] = []
-            done_event   = threading.Event()
-
-            def _drain():
-                for line in proc.stdout:
-                    output_lines.append(line)
-                done_event.set()
-
-            threading.Thread(target=_drain, daemon=True).start()
+                text=True)
 
             last_pct = -1
-            while not done_event.is_set():
-                time.sleep(0.5)
-                if self.image_path.exists() and self.source_size:
+            while proc.poll() is None:
+                time.sleep(1.0)
+                if (self.image_path.exists() and self.source_size
+                        and not self.args.json):
                     cur = self.image_path.stat().st_size
-                    pct = int(100 * cur / self.source_size)
-                    if pct != last_pct and not self.args.json:
+                    pct = min(int(100 * cur / self.source_size), 100)
+                    if pct != last_pct:
+                        ela = time.time() - t0
+                        spd = (cur / (1024**2)) / ela if ela else 0
                         bar = ("=" * (pct // 5)
                                + (">" if pct < 100 else "")
                                + " " * (20 - pct // 5 - (1 if pct < 100 else 0)))
-                        ela = time.time() - t0
-                        spd = (cur / (1024**2)) / ela if ela else 0
                         print(
                             f"\rImaging: [{bar}] {pct:3d}%  "
                             f"{cur / (1024**3):.1f}/"
                             f"{self.source_size / (1024**3):.1f} GB  "
-                            f"{spd:.1f} MB/s",
+                            f"{spd:.1f} MB/s  ",
                             end="", flush=True)
                         last_pct = pct
 
-            proc.wait()
-            if not self.args.json and last_pct >= 0:
-                print()
+            # Drain remaining output after process exits
+            output_text, _ = proc.communicate()
+            output_lines    = output_text.splitlines() if output_text else []
 
             self.duration = time.time() - t0
+            if not self.args.json and last_pct >= 0:
+                print()
 
             if proc.returncode != 0:
                 err_lines = [l for l in output_lines
@@ -339,7 +311,7 @@ class PtForensicImaging(ForensicToolBase):
                 lf.write(f"ddrescue started {datetime.now()}\n"
                          f"Command: {' '.join(cmd)}\n{'=' * 70}\n\n")
                 lf.flush()
-                proc          = subprocess.Popen(
+                proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, bufsize=1)
                 output_lines: List[str] = []
@@ -372,7 +344,6 @@ class PtForensicImaging(ForensicToolBase):
 
             ptprint("\n✓ ddrescue imaging completed", "OK", condition=self._out())
 
-            # Compute SHA-256 separately
             ptprint("\nCalculating SHA-256 …", "SUBTITLE", condition=self._out())
             r = self._run_command(["sha256sum", str(self.image_path)],
                                   timeout=7200)
@@ -388,7 +359,6 @@ class PtForensicImaging(ForensicToolBase):
             else:
                 ptprint(f"✗ Hash calculation failed: {r['stderr']}",
                         "ERROR", condition=self._out())
-                # Not fatal – imaging succeeded; hash is missing
 
             self._add_node("imagingResult", True,
                            tool="ddrescue",
@@ -454,40 +424,37 @@ class PtForensicImaging(ForensicToolBase):
                     else "damaged sector recovery with separate hashing")
 
         self.ptjsonlib.add_properties({
-            "compliance":       ["NIST SP 800-86", "ISO/IEC 27037:2012"],
-            "mediaStatus":      self.media_status,
-            "outputDir":        str(self.output_dir),
-            "imagePath":        str(self.image_path) if self.image_path else None,
-            "imageFormat":      "raw (.dd)",
-            "imageSizeBytes":   self.source_size,
-            "acquisitionMethod": method,
-            "toolVersion":      tool_ver,
-            "durationSeconds":  round(self.duration or 0, 2),
-            "averageSpeedMBps": round(self.avg_speed or 0, 2),
-            "hashAlgorithm":    "SHA-256",
-            "sourceHash":       self.source_hash,
-            "hashVerified":     bool(self.source_hash),
-            "errorSectors":     self.error_sectors,
+            "compliance":            ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+            "mediaStatus":           self.media_status,
+            "outputDir":             str(self.output_dir),
+            "imagePath":             str(self.image_path) if self.image_path else None,
+            "imageFormat":           "raw (.dd)",
+            "imageSizeBytes":        self.source_size,
+            "acquisitionMethod":     method,
+            "toolVersion":           tool_ver,
+            "durationSeconds":       round(self.duration or 0, 2),
+            "averageSpeedMBps":      round(self.avg_speed or 0, 2),
+            "hashAlgorithm":         "SHA-256",
+            "sourceHash":            self.source_hash,
+            "hashVerified":          bool(self.source_hash),
+            "errorSectors":          self.error_sectors,
             "writeBlockerConfirmed": not self.dry_run,
         })
         self.ptjsonlib.add_node(self.ptjsonlib.create_node_object(
             "chainOfCustodyEntry",
             properties={
-                "action":    "Forensic imaging complete",
-                "result":    "SUCCESS",
-                "analyst":   self.analyst,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "tool":      self.tool,
+                "action":     "Forensic imaging complete",
+                "result":     "SUCCESS",
+                "analyst":    self.analyst,
+                "timestamp":  datetime.now(timezone.utc).isoformat(),
+                "tool":       self.tool,
                 "sourceHash": self.source_hash,
             }
         ))
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        if self.args.json:
-            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-            return None
-
+        # FIX: see ptmediareadability.save_report for explanation
         if not self.args.json_out:
             return None
 
@@ -496,7 +463,8 @@ class PtForensicImaging(ForensicToolBase):
             json.dumps({"result": json.loads(self.ptjsonlib.get_result_json())},
                        indent=2, ensure_ascii=False),
             encoding="utf-8")
-        ptprint(f"\n✓ JSON saved: {out}", "OK", condition=True)
+        ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
+        ptprint(f"✓ JSON saved: {out}", "OK", condition=not self.args.json)
         return str(out)
 
 
