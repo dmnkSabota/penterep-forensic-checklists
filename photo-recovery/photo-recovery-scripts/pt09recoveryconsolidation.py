@@ -25,6 +25,15 @@ from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
+import signal
+
+
+def _custom_sigint_handler(sig, frame):
+    raise KeyboardInterrupt
+
+
+signal.signal(signal.SIGINT, _custom_sigint_handler)
+
 SCRIPTNAME         = "ptrecoveryconsolidation"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 HASH_CHUNK         = 65536
@@ -63,8 +72,12 @@ class PtRecoveryConsolidation(ForensicToolBase):
         self.output_dir = Path(args.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.fs_recovery_dir = self.output_dir / f"{self.case_id}_recovered"
-        self.carving_dir     = self.output_dir / f"{self.case_id}_carved"
+        self.fs_recovery_dir = (
+            Path(args.fs_recovery_dir) if getattr(args, "fs_recovery_dir", None)
+            else self.output_dir / f"{self.case_id}_recovered")
+        self.carving_dir = (
+            Path(args.carved_dir) if getattr(args, "carved_dir", None)
+            else self.output_dir / f"{self.case_id}_carved")
 
         self.consolidated_dir = self.output_dir / f"{self.case_id}_consolidated"
         self.fs_based_out     = self.consolidated_dir / "fs_based"
@@ -470,6 +483,8 @@ def get_help() -> List[Dict]:
         ]},
         {"options": [
             ["case-id",            "",      "Forensic case identifier – REQUIRED"],
+            ["--fs-recovery-dir",  "<dir>", "FS-based recovery dir (optional; auto-discovered)"],
+            ["--carved-dir",       "<dir>", "File carving dir (optional; auto-discovered)"],
             ["-a", "--analyst",    "<n>",   "Analyst name (default: Analyst)"],
             ["-o", "--output-dir", "<dir>", f"Output directory (default: {DEFAULT_OUTPUT_DIR})"],
             ["--dry-run",          "",      "Simulate without copying files"],
@@ -491,6 +506,10 @@ def get_help() -> List[Dict]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("case_id")
+    parser.add_argument("--fs-recovery-dir", default=None,
+                        help="Path to _recovered dir (optional; auto-discovered if omitted)")
+    parser.add_argument("--carved-dir", default=None,
+                        help="Path to _carved dir (optional; auto-discovered if omitted)")
     parser.add_argument("-a", "--analyst",    default="Analyst")
     parser.add_argument("-o", "--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("-q", "--quiet",      action="store_true")

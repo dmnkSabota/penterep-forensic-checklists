@@ -22,6 +22,15 @@ from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
+import signal
+
+
+def _custom_sigint_handler(sig, frame):
+    raise KeyboardInterrupt
+
+
+signal.signal(signal.SIGINT, _custom_sigint_handler)
+
 SCRIPTNAME         = "ptrepairdecision"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 
@@ -64,8 +73,9 @@ class PtRepairDecision(ForensicToolBase):
         self.output_dir = Path(args.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.validation_report = \
-            self.output_dir / f"{self.case_id}_validation_report.json"
+        self.validation_report = (
+            Path(args.validation_report) if getattr(args, "validation_report", None)
+            else self.output_dir / f"{self.case_id}_validation_report.json")
         self.decision_file = \
             self.output_dir / f"{self.case_id}_repair_decision.json"
 
@@ -298,6 +308,7 @@ def get_help() -> List[Dict]:
         ]},
         {"options": [
             ["case-id",            "",      "Forensic case identifier – REQUIRED"],
+            ["-r", "--validation-report", "<f>", "Path to validation_report.json (optional; auto-discovered)"],
             ["-a", "--analyst",    "<n>",   "Analyst name (default: Analyst)"],
             ["-o", "--output-dir", "<dir>", f"Output directory (default: {DEFAULT_OUTPUT_DIR})"],
             ["--dry-run",          "",      "Simulate with synthetic validation data"],
@@ -322,6 +333,8 @@ def get_help() -> List[Dict]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("case_id")
+    parser.add_argument("-r", "--validation-report", default=None,
+                        help="Path to validation_report.json (optional; auto-discovered if omitted)")
     parser.add_argument("-a", "--analyst",    default="Analyst")
     parser.add_argument("-o", "--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("-q", "--quiet",      action="store_true")

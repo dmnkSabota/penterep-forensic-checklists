@@ -25,6 +25,15 @@ from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
+import signal
+
+
+def _custom_sigint_handler(sig, frame):
+    raise KeyboardInterrupt
+
+
+signal.signal(signal.SIGINT, _custom_sigint_handler)
+
 SCRIPTNAME         = "ptfilesystemrecovery"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 FLS_TIMEOUT        = 1800
@@ -112,7 +121,9 @@ class PtFilesystemRecovery(ForensicToolBase):
         ptprint("\n[1/3] Loading filesystem analysis",
                 "TITLE", condition=self._out())
 
-        f = self.output_dir / f"{self.case_id}_filesystem_analysis.json"
+        f = (Path(self.args.analysis_file)
+             if getattr(self.args, "analysis_file", None)
+             else self.output_dir / f"{self.case_id}_filesystem_analysis.json")
         if not f.exists():
             return self._fail("fsAnalysisLoad",
                               f"{f.name} not found – run Filesystem Analysis first.")
@@ -537,6 +548,7 @@ def get_help() -> List[Dict]:
         ]},
         {"options": [
             ["case-id",            "",      "Forensic case identifier – REQUIRED"],
+            ["--analysis-file",    "<f>",   "Path to filesystem_analysis.json (optional)"],
             ["-a", "--analyst",    "<n>",   "Analyst name (default: Analyst)"],
             ["-o", "--output-dir", "<dir>", f"Output directory (default: {DEFAULT_OUTPUT_DIR})"],
             ["--dry-run",          "",      "Simulate without running external commands"],
@@ -558,6 +570,8 @@ def get_help() -> List[Dict]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("case_id")
+    parser.add_argument("--analysis-file", default=None,
+                        help="Path to filesystem_analysis.json (optional; auto-discovered from --output-dir if omitted)")
     parser.add_argument("-a", "--analyst",    default="Analyst")
     parser.add_argument("-o", "--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("-q", "--quiet",      action="store_true")

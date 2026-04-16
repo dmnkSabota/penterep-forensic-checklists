@@ -29,6 +29,15 @@ from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
+import signal
+
+
+def _custom_sigint_handler(sig, frame):
+    raise KeyboardInterrupt
+
+
+signal.signal(signal.SIGINT, _custom_sigint_handler)
+
 SCRIPTNAME         = "ptphotorepair"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 VALIDATE_TIMEOUT   = 30
