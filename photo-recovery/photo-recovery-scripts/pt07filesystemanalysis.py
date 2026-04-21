@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-    Copyright (c) 2025 Bc. Dominik Sabota, VUT FIT Brno
+    Copyright (c) 2026 Bc. Dominik Sabota, VUT FIT Brno
 
     ptfilesystemanalysis - Forensic filesystem analysis tool
 
@@ -9,6 +9,10 @@
     the Free Software Foundation, either version 3 of the License.
     See <https://www.gnu.org/licenses/> for details.
 """
+
+# LAST CHANGES:
+#   - IMAGE_EXTENSIONS and FORMAT_GROUPS replaced with imports from _constants
+#   - Fixed save_report() JSON-to-stdout bug (consistent with other tools)
 
 import argparse
 import json
@@ -20,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ._version import __version__
+from ._constants import IMAGE_EXTENSIONS, FORMAT_GROUP_MAP
 from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
@@ -36,23 +41,6 @@ DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 MMLS_TIMEOUT       = 60
 FSSTAT_TIMEOUT     = 60
 FLS_TIMEOUT        = 600
-
-IMAGE_EXTENSIONS: set = {
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp",
-    ".tiff", ".tif", ".heic", ".heif", ".webp",
-    ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
-    ".dng", ".orf", ".raf", ".rw2", ".pef", ".raw",
-}
-
-FORMAT_GROUPS: Dict[str, str] = {
-    "jpg": "jpeg", "jpeg": "jpeg", "png": "png",
-    "tif": "tiff", "tiff": "tiff",
-    "gif": "other", "bmp": "other", "heic": "other",
-    "heif": "other", "webp": "other",
-    "cr2": "raw", "cr3": "raw", "nef": "raw", "nrw": "raw",
-    "arw": "raw", "srf": "raw", "sr2": "raw", "dng": "raw",
-    "orf": "raw", "raf": "raw", "rw2": "raw", "pef": "raw", "raw": "raw",
-}
 
 FS_TYPE_MAP: Dict[str, str] = {
     "FAT32": "FAT32", "FAT16": "FAT16", "FAT12": "FAT12",
@@ -125,9 +113,9 @@ class PtFilesystemAnalysis(ForensicToolBase):
 
     def check_tools(self) -> bool:
         ptprint("\n[1/2] Checking Sleuth Kit tools", "TITLE", condition=self._out())
-        tools   = {"mmls": "partition table parser",
+        tools   = {"mmls":   "partition table parser",
                    "fsstat": "filesystem statistics",
-                   "fls": "file listing"}
+                   "fls":    "file listing"}
         missing = []
         for t, desc in tools.items():
             found = self._check_command(t)
@@ -285,16 +273,17 @@ class PtFilesystemAnalysis(ForensicToolBase):
         return True, active, deleted, file_list
 
     def identify_image_files(self, file_list: List[Dict]) -> Dict[str, Any]:
+        # Uses IMAGE_EXTENSIONS and FORMAT_GROUP_MAP from _constants
         counts: Dict[str, Any] = {
             "total": 0, "active": 0, "deleted": 0,
             "byFormat": {g: {"active": 0, "deleted": 0}
-                         for g in set(FORMAT_GROUPS.values())},
+                         for g in set(FORMAT_GROUP_MAP.values())},
         }
         for entry in file_list:
             ext = Path(entry["filename"]).suffix.lower()
             if ext not in IMAGE_EXTENSIONS:
                 continue
-            group      = FORMAT_GROUPS.get(ext.lstrip("."), "other")
+            group      = FORMAT_GROUP_MAP.get(ext.lstrip("."), "other")
             counts["total"] += 1
             sk = "deleted" if entry["deleted"] else "active"
             counts[sk] += 1

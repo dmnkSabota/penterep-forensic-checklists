@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-    Copyright (c) 2025 Bc. Dominik Sabota, VUT FIT Brno
+    Copyright (c) 2026 Bc. Dominik Sabota, VUT FIT Brno
 
     ptfilesystemrecovery - Forensic filesystem-based photo recovery tool
 
@@ -9,6 +9,14 @@
     the Free Software Foundation, either version 3 of the License.
     See <https://www.gnu.org/licenses/> for details.
 """
+
+# LAST CHANGES:
+#   - IMAGE_EXTENSIONS, IMAGE_FILE_KEYWORDS, FORMAT_GROUPS replaced with
+#     imports from _constants (single source of truth)
+#   - _validate_image() removed; replaced by self._validate_image_file()
+#     inherited from ForensicToolBase (was duplicated in ptfilecarving too)
+#   - Changed --json boolean flag to --json-out <file> for consistency with
+#     all other tools in the scenario
 
 import argparse
 import json
@@ -21,6 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ._version import __version__
+from ._constants import IMAGE_EXTENSIONS, FORMAT_GROUP_MAP
 from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
@@ -39,24 +48,6 @@ DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 FLS_TIMEOUT        = 1800
 ICAT_TIMEOUT       = 60
 EXIF_TIMEOUT       = 30
-
-IMAGE_EXTENSIONS: set = {
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp",
-    ".tiff", ".tif", ".heic", ".heif", ".webp",
-    ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
-    ".dng", ".orf", ".raf", ".rw2", ".pef", ".raw",
-}
-
-FORMAT_GROUPS: Dict[str, List[str]] = {
-    "jpeg": [".jpg", ".jpeg"], "png":  [".png"],
-    "tiff": [".tif", ".tiff"], "bmp":  [".bmp"], "gif": [".gif"],
-    "heic": [".heic", ".heif"], "webp": [".webp"],
-    "raw":  [".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
-             ".dng", ".orf", ".raf", ".rw2", ".pef", ".raw"],
-}
-
-IMAGE_FILE_KEYWORDS = {"image", "jpeg", "png", "tiff", "gif", "bitmap",
-                       "raw", "canon", "nikon", "exif", "riff webp"}
 
 # Matches fls output lines: "r/r [* ]inode[-alloc]: path"
 _FLS_LINE = re.compile(r"^\S+\s+\*?\s*(\d+)(?:-\d+)?:\s+(.+)$")
@@ -95,11 +86,11 @@ class PtFilesystemRecovery(ForensicToolBase):
         self._recovered_files: List[Dict] = []
 
         self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
+            "caseId":          self.case_id,
             "outputDirectory": str(self.output_dir),
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "dryRun":        self.dry_run,
+            "timestamp":       datetime.now(timezone.utc).isoformat(),
+            "scriptVersion":   __version__,
+            "dryRun":          self.dry_run,
         })
 
     # ------------------------------------------------------------------
@@ -107,11 +98,7 @@ class PtFilesystemRecovery(ForensicToolBase):
     # ------------------------------------------------------------------
 
     def _format_group(self, ext: str) -> str:
-        ext = ext.lower()
-        for group, exts in FORMAT_GROUPS.items():
-            if ext in exts:
-                return group
-        return ext.lstrip(".")
+        return FORMAT_GROUP_MAP.get(ext.lstrip(".").lower(), "other")
 
     # ------------------------------------------------------------------
     # Phases
@@ -179,8 +166,10 @@ class PtFilesystemRecovery(ForensicToolBase):
 
     def check_tools(self) -> bool:
         ptprint("\n[2/3] Checking required tools", "TITLE", condition=self._out())
-        tools   = {"fls": "TSK file listing", "icat": "TSK inode extraction",
-                   "file": "file type detection", "identify": "ImageMagick validation",
+        tools   = {"fls":      "TSK file listing",
+                   "icat":     "TSK inode extraction",
+                   "file":     "file type detection",
+                   "identify": "ImageMagick validation",
                    "exiftool": "EXIF extraction"}
         missing = []
         for t, desc in tools.items():
@@ -220,7 +209,6 @@ class PtFilesystemRecovery(ForensicToolBase):
                 continue
             self._s["scanned"] += 1
 
-            # Parse "type  [* ]inode[-alloc]: filepath"
             m = _FLS_LINE.match(line)
             if not m:
                 continue
@@ -267,31 +255,6 @@ class PtFilesystemRecovery(ForensicToolBase):
         if dest.exists():
             dest.unlink()
         return None
-
-    def _validate_image(self, filepath: Path) -> Tuple[str, Dict]:
-        info: Dict = {"size": 0, "imageFormat": None, "dimensions": None}
-        try:
-            info["size"] = filepath.stat().st_size
-        except Exception as exc:
-            return "invalid", {**info, "error": str(exc)}
-
-        if info["size"] == 0:
-            return "invalid", info
-
-        r = self._run_command(["file", "-b", str(filepath)], timeout=10)
-        if r["success"] and not any(kw in r["stdout"].lower()
-                                    for kw in IMAGE_FILE_KEYWORDS):
-            return "invalid", info
-
-        r = self._run_command(["identify", str(filepath)], timeout=30)
-        if r["success"]:
-            m = re.search(r"(\w+)\s+(\d+)x(\d+)", r["stdout"])
-            if m:
-                info["imageFormat"] = m.group(1)
-                info["dimensions"]  = f"{m.group(2)}x{m.group(3)}"
-            return "valid", info
-
-        return ("corrupted" if info["size"] > 1024 else "invalid"), info
 
     def _extract_metadata(self, filepath: Path, entry: Dict) -> Dict:
         meta: Dict = {
@@ -358,7 +321,8 @@ class PtFilesystemRecovery(ForensicToolBase):
                 self._s["invalid"] += 1; continue
             self._s["extracted"] += 1
 
-            status, vinfo = self._validate_image(extracted)
+            # _validate_image_file() is now defined in ForensicToolBase
+            status, vinfo = self._validate_image_file(extracted)
 
             if status == "valid":
                 self._s["valid"] += 1
@@ -553,7 +517,7 @@ def get_help() -> List[Dict]:
             ["-o", "--output-dir", "<dir>", f"Output directory (default: {DEFAULT_OUTPUT_DIR})"],
             ["--dry-run",          "",      "Simulate without running external commands"],
             ["--force",            "",      "Override file_carving recommendation"],
-            ["-j", "--json",       "",      "JSON output for platform integration"],
+            ["-j", "--json-out",   "<f>",   "Save JSON report to file"],
             ["-q", "--quiet",      "",      "Suppress terminal output"],
             ["-h", "--help",       "",      "Show help"],
             ["--version",          "",      "Show version"],
@@ -570,14 +534,13 @@ def get_help() -> List[Dict]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("case_id")
-    parser.add_argument("--analysis-file", default=None,
-                        help="Path to filesystem_analysis.json (optional; auto-discovered from --output-dir if omitted)")
+    parser.add_argument("--analysis-file", default=None)
     parser.add_argument("-a", "--analyst",    default="Analyst")
     parser.add_argument("-o", "--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("-q", "--quiet",      action="store_true")
     parser.add_argument("--dry-run",          action="store_true")
     parser.add_argument("--force",            action="store_true")
-    parser.add_argument("-j", "--json",       action="store_true")
+    parser.add_argument("-j", "--json-out",   default=None)
     parser.add_argument("--version", action="version",
                         version=f"{SCRIPTNAME} {__version__}")
 
@@ -586,6 +549,7 @@ def parse_args() -> argparse.Namespace:
         sys.exit(0)
 
     args = parser.parse_args()
+    args.json = bool(args.json_out)
     if args.json:
         args.quiet = True
     ptprinthelper.print_banner(SCRIPTNAME, __version__, args.json)

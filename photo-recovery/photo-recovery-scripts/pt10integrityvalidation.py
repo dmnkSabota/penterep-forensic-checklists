@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-    Copyright (c) 2025 Bc. Dominik Sabota, VUT FIT Brno
+    Copyright (c) 2026 Bc. Dominik Sabota, VUT FIT Brno
 
-    ptintegrityvalidation - Photo integrity validation tool
+    ptintegrityvalidation - Forensic file integrity validation
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -10,20 +10,34 @@
     See <https://www.gnu.org/licenses/> for details.
 """
 
+# LAST CHANGES:
+#   - FIXED disk space issue: original copied files into valid/repairable/
+#     corrupted/ subdirectories, creating a third copy of every file on disk.
+#     Now: files are validated IN-PLACE (in the consolidated directory from
+#     Step 9); the JSON report records the path and classification of each file.
+#     No files are moved or copied. The next step (ptrepairdecision) reads
+#     the JSON and works on files at their existing paths.
+#   - IMAGE_EXTENSIONS replaced with import from _constants
+#   - _validate_file() stage-1 and stage-2 now call self._validate_image_file()
+#     from ForensicToolBase for the basic checks; format-specific checks
+#     (jpeginfo, pngcheck, tiffinfo) remain here as they are more detailed
+#     than the base method and are not shared with other tools
+#   - Changed --json boolean flag to --json-out <file> for consistency
+
 import argparse
 import json
-import shutil
+import re
+import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ._version import __version__
+from ._constants import IMAGE_EXTENSIONS
 from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
-
-import signal
 
 
 def _custom_sigint_handler(sig, frame):
@@ -36,227 +50,313 @@ SCRIPTNAME         = "ptintegrityvalidation"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 VALIDATE_TIMEOUT   = 30
 
-IMAGE_EXTENSIONS: set = {
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp",
-    ".tiff", ".tif", ".heic", ".heif", ".webp",
-    ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
-    ".dng", ".orf", ".raf", ".rw2", ".pef", ".raw",
+# Corruption type → human-readable description
+CORRUPTION_TYPES: Dict[str, str] = {
+    "missing_footer":   "Missing end marker (EOI/EOF)",
+    "invalid_header":   "Invalid or corrupt file header",
+    "corrupt_segments": "Damaged internal segments",
+    "truncated":        "File appears truncated",
+    "corrupt_data":     "Image data region is damaged",
+    "unknown":          "Unclassified corruption",
 }
 
 
 class PtIntegrityValidation(ForensicToolBase):
     """
-    Three-stage integrity validation (size → file type → format-specific tool)
-    for all recovered photos. Classifies each file as VALID, REPAIRABLE, or
-    CORRUPTED. Read-only on source directories (copies, never modifies originals).
+    Validates integrity of recovered image files using a three-stage approach:
+
+      Stage 1 – basic:    file(1) type check + ImageMagick identify
+                          (delegates to self._validate_image_file() in base)
+      Stage 2 – detailed: format-specific tools (jpeginfo, pngcheck, tiffinfo)
+      Stage 3 – classify: determine corruption type for REPAIRABLE files
+
+    Files are validated IN-PLACE in the consolidated directory (Step 9).
+    No files are moved or copied – the output is a JSON classification report
+    only. This avoids creating a third copy of every file on disk.
     """
 
     def __init__(self, args: argparse.Namespace) -> None:
         self.ptjsonlib  = ptjsonlib.PtJsonLib()
         self.args       = args
         self.case_id    = args.case_id.strip()
-        self.analyst    = args.analyst
+        self.analyst    = getattr(args, "analyst", "Analyst")
         self.dry_run    = args.dry_run
         self.output_dir = Path(args.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.consolidated_dir = (
-            Path(args.consolidated_dir) if getattr(args, "consolidated_dir", None)
-            else self.output_dir / f"{self.case_id}_consolidated")
-        self.validation_dir   = self.consolidated_dir / "validation"
-        self.valid_dir        = self.validation_dir / "valid"
-        self.repairable_dir   = self.validation_dir / "repairable"
-        self.corrupted_dir    = self.validation_dir / "corrupted"
+        # Reads from consolidated dir (Step 9 output)
+        self.consolidated_dir = self.output_dir / f"{self.case_id}_consolidated"
 
         self._s: Dict[str, Any] = {
             "total": 0, "valid": 0, "repairable": 0, "corrupted": 0,
-            "by_format": {"valid": {}, "repairable": {}, "corrupted": {}},
+            "by_format": {}, "corruption_types": {},
         }
         self._results: List[Dict] = []
 
         self.ptjsonlib.add_properties({
             "caseId":        self.case_id,
-            "outputDirectory": str(self.output_dir),
+            "analyst":       self.analyst,
             "timestamp":     datetime.now(timezone.utc).isoformat(),
             "scriptVersion": __version__,
             "dryRun":        self.dry_run,
         })
 
     # ------------------------------------------------------------------
+    # Format-specific detailed validation (Stage 2)
+    # ------------------------------------------------------------------
+
+    def _validate_jpeg_detail(self, path: Path) -> Tuple[str, str]:
+        """
+        Use jpeginfo for detailed JPEG validation.
+        Returns (status, corruption_type) where status is 'valid' or
+        a corruption descriptor.
+        """
+        r = self._run_command(["jpeginfo", "-c", str(path)], timeout=VALIDATE_TIMEOUT)
+
+        if r["success"]:
+            out = r["stdout"].lower()
+            if "ok" in out and "error" not in out:
+                return "valid", "none"
+            if "unexpected end" in out or "premature end" in out:
+                return "repairable", "truncated"
+            if "missing eoi" in out or "extraneous bytes" in out:
+                return "repairable", "missing_footer"
+            if "invalid marker" in out or "corrupt" in out:
+                return "repairable", "corrupt_segments"
+
+        # jpeginfo not available or returned error – try pillow
+        try:
+            from PIL import Image
+            Image.MAX_IMAGE_PIXELS = None
+            img = Image.open(str(path))
+            img.verify()
+            return "valid", "none"
+        except ImportError:
+            pass
+        except Exception as exc:
+            exc_s = str(exc).lower()
+            if "truncat" in exc_s:
+                return "repairable", "truncated"
+            if "header" in exc_s or "magic" in exc_s:
+                return "repairable", "invalid_header"
+            return "repairable", "corrupt_data"
+
+        # Fallback: try PIL with LOAD_TRUNCATED_IMAGES
+        try:
+            from PIL import Image, ImageFile
+            ImageFile.LOAD_TRUNCATED_IMAGES = True
+            img = Image.open(str(path))
+            img.load()
+            return "repairable", "truncated"
+        except Exception:
+            pass
+
+        return "corrupted", "unknown"
+
+    def _validate_png_detail(self, path: Path) -> Tuple[str, str]:
+        """pngcheck for detailed PNG validation."""
+        r = self._run_command(["pngcheck", "-v", str(path)],
+                              timeout=VALIDATE_TIMEOUT)
+        if r["success"]:
+            out = r["stdout"].lower()
+            if "ok" in out and "error" not in out:
+                return "valid", "none"
+        if r["stderr"]:
+            err = r["stderr"].lower()
+            if "crc error" in err or "invalid chunk" in err:
+                return "repairable", "corrupt_segments"
+            if "premature end" in err or "truncat" in err:
+                return "repairable", "truncated"
+            return "corrupted", "unknown"
+        return "corrupted", "unknown"
+
+    def _validate_tiff_detail(self, path: Path) -> Tuple[str, str]:
+        """tiffinfo for detailed TIFF validation."""
+        r = self._run_command(["tiffinfo", str(path)], timeout=VALIDATE_TIMEOUT)
+        if r["success"]:
+            return "valid", "none"
+        err = (r["stderr"] + r["stdout"]).lower()
+        if "bad value" in err or "corrupt" in err:
+            return "repairable", "corrupt_segments"
+        if "unrecognized" in err or "not a tiff" in err:
+            return "corrupted", "invalid_header"
+        return "corrupted", "unknown"
+
+    def _validate_generic_detail(self, path: Path) -> Tuple[str, str]:
+        """Pillow fallback for formats without a dedicated validator."""
+        try:
+            from PIL import Image
+            img = Image.open(str(path))
+            img.verify()
+            return "valid", "none"
+        except ImportError:
+            pass
+        except Exception:
+            return "repairable", "corrupt_data"
+        return "corrupted", "unknown"
+
+    # ------------------------------------------------------------------
+    # Full three-stage validation for a single file
+    # ------------------------------------------------------------------
+
+    def _validate_full(self, path: Path) -> Dict:
+        """
+        Run three-stage validation on a single file.
+        Returns a result dict with status, corruption_type, and info.
+        """
+        ext = path.suffix.lower()
+
+        # Stage 1: _validate_image_file() from ForensicToolBase
+        # (size check → file(1) → ImageMagick identify)
+        base_status, vinfo = self._validate_image_file(path)
+
+        if base_status == "invalid":
+            return {
+                "path":           str(path),
+                "filename":       path.name,
+                "status":         "corrupted",
+                "corruptionType": "invalid_header",
+                "sizeBytes":      vinfo.get("size", 0),
+                "imageFormat":    None,
+                "dimensions":     None,
+            }
+
+        if base_status == "valid":
+            # Stage 2: format-specific detailed check
+            if ext in (".jpg", ".jpeg"):
+                det_status, ctype = self._validate_jpeg_detail(path)
+            elif ext == ".png":
+                det_status, ctype = self._validate_png_detail(path)
+            elif ext in (".tif", ".tiff"):
+                det_status, ctype = self._validate_tiff_detail(path)
+            else:
+                det_status, ctype = self._validate_generic_detail(path)
+        else:
+            # base_status == "corrupted" – skip Stage 2
+            det_status, ctype = "repairable", "corrupt_data"
+
+        # Map detailed status to canonical output status
+        if det_status == "valid":
+            final_status = "valid"
+            ctype        = "none"
+        elif det_status == "repairable":
+            final_status = "repairable"
+        else:
+            final_status = "corrupted"
+            if ctype == "none":
+                ctype = "unknown"
+
+        return {
+            "path":           str(path),
+            "filename":       path.name,
+            "status":         final_status,
+            "corruptionType": ctype,
+            "sizeBytes":      vinfo.get("size", 0),
+            "imageFormat":    vinfo.get("imageFormat"),
+            "dimensions":     vinfo.get("dimensions"),
+        }
+
+    # ------------------------------------------------------------------
     # Phases
     # ------------------------------------------------------------------
 
-    def check_source(self) -> bool:
-        ptprint("\n[1/3] Checking source directory", "TITLE", condition=self._out())
-
-        if not self.consolidated_dir.exists() and not self.dry_run:
-            return self._fail("sourceCheck",
-                              f"{self.consolidated_dir.name} not found – "
-                              "run Recovery Consolidation first.")
-        ptprint(f"  ✓ Source: {self.consolidated_dir.name}",
-                "OK", condition=self._out())
-        self._add_node("sourceCheck", True,
-                       consolidatedDir=str(self.consolidated_dir))
-        return True
-
     def check_tools(self) -> bool:
-        ptprint("\n[2/3] Checking validation tools", "TITLE", condition=self._out())
+        ptprint("\n[1/2] Checking validation tools", "TITLE", condition=self._out())
         tools = {
-            "file":     ("file type detection",  True),
-            "identify": ("ImageMagick",          True),
-            "jpeginfo": ("JPEG validation",      False),
-            "pngcheck": ("PNG validation",       False),
-            "tiffinfo": ("TIFF validation",      False),
-            "exiftool": ("EXIF / RAW validation",False),
+            "identify":  "ImageMagick (Stage 1 – required)",
+            "file":      "file type detection (Stage 1 – required)",
+            "jpeginfo":  "JPEG validation (Stage 2 – optional)",
+            "pngcheck":  "PNG validation  (Stage 2 – optional)",
+            "tiffinfo":  "TIFF validation (Stage 2 – optional)",
         }
-        missing_critical = []
-        for t, (desc, critical) in tools.items():
+        missing_required = []
+        for t, desc in tools.items():
             found = self._check_command(t)
-            ptprint(f"  [{'OK' if found else ('ERROR' if critical else 'WARNING')}] "
-                    f"{t}: {desc}",
-                    "OK" if found else ("ERROR" if critical else "WARNING"),
-                    condition=self._out())
-            if not found and critical:
-                missing_critical.append(t)
+            ptprint(f"  [{'OK' if found else 'WARN'}] {t}: {desc}",
+                    "OK" if found else "WARNING", condition=self._out())
+            if not found and "required" in desc:
+                missing_required.append(t)
 
-        if missing_critical:
-            ptprint(f"Critical tools missing: {', '.join(missing_critical)} – "
-                    "sudo apt-get install file imagemagick",
+        if missing_required:
+            ptprint(f"  Missing required: {', '.join(missing_required)}",
                     "ERROR", condition=self._out())
-            self._add_node("toolsCheck", False, missingTools=missing_critical)
+            self._add_node("toolsCheck", False, missingRequired=missing_required)
             return False
 
-        self._add_node("toolsCheck", True, toolsChecked=list(tools))
+        ptprint("  Optional tools (jpeginfo/pngcheck/tiffinfo) fall back to "
+                "PIL/Pillow if unavailable.", "INFO", condition=self._out())
+        self._add_node("toolsCheck", True, tools=list(tools))
         return True
 
-    def collect_files(self) -> List[Path]:
-        ptprint("\n[3/3] Scanning for image files", "TITLE", condition=self._out())
-        files = []
-        for source in ("fs_based", "carved"):
-            d = self.consolidated_dir / source
-            if d.exists():
-                batch = [f for f in d.rglob("*")
-                         if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS]
-                files.extend(batch)
-                ptprint(f"  {source}/: {len(batch)} image files",
-                        "INFO", condition=self._out())
-        self._s["total"] = len(files)
-        ptprint(f"  Total: {len(files)} files to validate",
-                "OK", condition=self._out())
-        self._add_node("fileScan", True, totalFiles=len(files))
-        return files
+    def validate_all(self) -> bool:
+        ptprint("\n[2/2] Validating files (in-place – no copies created)",
+                "TITLE", condition=self._out())
 
-    def _validate_file(self, filepath: Path) -> Tuple[str, Dict]:
-        """Three-stage validation: file size → file(1) → format-specific tool."""
-        details: Dict = {"size": 0, "details": ""}
+        if not self.consolidated_dir.exists() and not self.dry_run:
+            return self._fail("integrityValidation",
+                              f"{self.consolidated_dir.name} not found – "
+                              "run Recovery Consolidation first.")
 
-        # Stage 1: minimum size
-        try:
-            details["size"] = filepath.stat().st_size
-        except Exception:
-            details["details"] = "Cannot read file"
-            return "corrupted", details
+        candidates = []
+        if not self.dry_run:
+            candidates = [
+                f for f in self.consolidated_dir.rglob("*")
+                if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
+            ]
 
-        if details["size"] < 100:
-            details["details"] = "File too small"
-            return "corrupted", details
+        ptprint(f"  Files to validate: {len(candidates)}",
+                "INFO", condition=self._out())
 
-        # Stage 2: file(1) type check
-        r = self._run_command(["file", "-b", str(filepath)], timeout=10)
-        if not r["success"] or "image" not in r["stdout"].lower():
-            details["details"] = "Not recognised as an image by file(1)"
-            return "corrupted", details
-
-        # Stage 3: format-specific validation
-        ext = filepath.suffix.lstrip(".").lower()
-
-        if ext in ("jpg", "jpeg"):
-            r = self._run_command(["jpeginfo", "-c", str(filepath)],
-                                  timeout=VALIDATE_TIMEOUT)
-            if r["success"]:
-                details["details"] = "OK"
-                return "valid", details
-            # Fall back to ImageMagick – may still be salvageable
-            r = self._run_command(["identify", str(filepath)],
-                                  timeout=VALIDATE_TIMEOUT)
-            if r["success"]:
-                details["details"] = "Minor errors detected (repairable)"
-                return "repairable", details
-            details["details"] = "JPEG validation failed"
-            return "corrupted", details
-
-        if ext == "png":
-            r = self._run_command(["pngcheck", str(filepath)],
-                                  timeout=VALIDATE_TIMEOUT)
-            if r["success"] and "OK" in r["stdout"]:
-                details["details"] = "OK"
-                return "valid", details
-            if "warning" in r["stdout"].lower():
-                details["details"] = "PNG warnings (repairable)"
-                return "repairable", details
-            details["details"] = "PNG validation failed"
-            return "corrupted", details
-
-        if ext in ("tif", "tiff"):
-            r = self._run_command(["tiffinfo", str(filepath)],
-                                  timeout=VALIDATE_TIMEOUT)
-            if r["success"]:
-                details["details"] = "OK"
-                return "valid", details
-            details["details"] = "TIFF validation failed"
-            return "corrupted", details
-
-        # Generic fallback: ImageMagick identify
-        r = self._run_command(["identify", str(filepath)],
-                              timeout=VALIDATE_TIMEOUT)
-        if r["success"]:
-            details["details"] = "OK (generic validation)"
-            return "valid", details
-        details["details"] = f"{ext.upper()} validation failed"
-        return "corrupted", details
-
-    def validate_files(self, files: List[Path]) -> None:
-        ptprint("\nValidating integrity …", "TITLE", condition=self._out())
-        total = len(files)
-
-        for idx, fp in enumerate(files, 1):
-            if idx % 100 == 0 or idx == total:
-                ptprint(f"  {idx}/{total} ({idx * 100 // total}%)",
-                        "INFO", condition=self._out())
-
-            status, details = self._validate_file(fp)
-            ext             = fp.suffix.lstrip(".").lower()
-
-            self._s[status] += 1
-            fmt_bucket = self._s["by_format"].get(status, {})
-            fmt_bucket[ext] = fmt_bucket.get(ext, 0) + 1
-
-            self._results.append({
-                "filename":          fp.name,
-                "path":              str(fp.relative_to(self.consolidated_dir)),
-                "format":            ext,
-                "status":            status,
-                "sizeBytes":         details.get("size", 0),
-                "validationDetails": details.get("details", ""),
-            })
-
+        if not candidates:
             if not self.dry_run:
-                dest_dir = {"valid":      self.valid_dir,
-                            "repairable": self.repairable_dir,
-                            "corrupted":  self.corrupted_dir}[status]
-                shutil.copy2(str(fp), str(dest_dir / fp.name))
+                ptprint("  No image files found in consolidated directory.",
+                        "WARNING", condition=self._out())
+            self._add_node("integrityValidation", True,
+                           dryRun=self.dry_run, totalFiles=0)
+            return True
 
-        rate = round(self._s["valid"] / total * 100, 1) if total else 0
-        ptprint(f"Validation complete  |  Valid: {self._s['valid']}  |  "
-                f"Repairable: {self._s['repairable']}  |  "
-                f"Corrupted: {self._s['corrupted']}  |  Rate: {rate}%",
+        for idx, fp in enumerate(candidates, 1):
+            if idx % 100 == 0 or idx == len(candidates):
+                pct = idx * 100 // len(candidates)
+                ptprint(f"  {idx}/{len(candidates)} ({pct}%)",
+                        "INFO", condition=self._out())
+
+            result = self._validate_full(fp)
+            self._results.append(result)
+
+            status = result["status"]
+            ext    = fp.suffix.lower()
+            fmt    = ext.lstrip(".")
+
+            self._s["total"] += 1
+            self._s[status]  = self._s.get(status, 0) + 1
+            self._s["by_format"][fmt] = self._s["by_format"].get(fmt, 0) + 1
+
+            if status in ("repairable", "corrupted"):
+                ctype = result["corruptionType"]
+                self._s["corruption_types"][ctype] = (
+                    self._s["corruption_types"].get(ctype, 0) + 1)
+
+        s = self._s
+        ptprint(f"\n  Validated: {s['total']}  |  "
+                f"Valid: {s.get('valid', 0)}  |  "
+                f"Repairable: {s.get('repairable', 0)}  |  "
+                f"Corrupted: {s.get('corrupted', 0)}",
                 "OK", condition=self._out())
-        self._add_node("validation", True,
-                       totalFiles=total,
-                       validFiles=self._s["valid"],
-                       repairableFiles=self._s["repairable"],
-                       corruptedFiles=self._s["corrupted"],
-                       validationRate=rate)
+        if s["corruption_types"]:
+            ptprint("  Corruption types:", "INFO", condition=self._out())
+            for ctype, count in sorted(s["corruption_types"].items()):
+                desc = CORRUPTION_TYPES.get(ctype, ctype)
+                ptprint(f"    {count:4d}× {desc}", "INFO", condition=self._out())
+
+        self._add_node("integrityValidation", True,
+                       totalFiles=s["total"],
+                       validFiles=s.get("valid", 0),
+                       repairableFiles=s.get("repairable", 0),
+                       corruptedFiles=s.get("corrupted", 0),
+                       corruptionTypes=s["corruption_types"],
+                       byFormat=s["by_format"])
+        return True
 
     # ------------------------------------------------------------------
     # Run and save
@@ -264,105 +364,73 @@ class PtIntegrityValidation(ForensicToolBase):
 
     def run(self) -> None:
         ptprint("=" * 70, "TITLE", condition=self._out())
-        ptprint(f"PHOTO INTEGRITY VALIDATION v{__version__}  |  "
+        ptprint(f"INTEGRITY VALIDATION v{__version__}  |  "
                 f"Case: {self.case_id}", "TITLE", condition=self._out())
         if self.dry_run:
             ptprint("MODE: DRY-RUN", "WARNING", condition=self._out())
         ptprint("=" * 70, "TITLE", condition=self._out())
 
-        if not self.check_source():
-            self.ptjsonlib.set_status("finished"); return
         if not self.check_tools():
             self.ptjsonlib.set_status("finished"); return
+        self.validate_all()
 
-        if not self.dry_run:
-            for path in (self.valid_dir, self.repairable_dir, self.corrupted_dir):
-                path.mkdir(parents=True, exist_ok=True)
-
-        files = self.collect_files()
-        if not files and not self.dry_run:
-            ptprint("No image files found.", "ERROR", condition=self._out())
-            self.ptjsonlib.set_status("finished"); return
-
-        self.validate_files(files)
-
-        s    = self._s
-        rate = round(s["valid"] / s["total"] * 100, 1) if s["total"] else None
+        s = self._s
         self.ptjsonlib.add_properties({
             "compliance":       ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+            "method":           "in_place_validation",
             "totalFiles":       s["total"],
-            "validFiles":       s["valid"],
-            "repairableFiles":  s["repairable"],
-            "corruptedFiles":   s["corrupted"],
-            "validationRate":   rate,
+            "validFiles":       s.get("valid", 0),
+            "repairableFiles":  s.get("repairable", 0),
+            "corruptedFiles":   s.get("corrupted", 0),
+            "corruptionTypes":  s["corruption_types"],
             "byFormat":         s["by_format"],
-            "validationDir":    str(self.validation_dir),
+            "consolidatedDir":  str(self.consolidated_dir),
         })
         self.ptjsonlib.add_node(self.ptjsonlib.create_node_object(
             "chainOfCustodyEntry",
             properties={
                 "action":    (f"Integrity validation complete – "
-                              f"{s['valid']} VALID, {s['repairable']} REPAIRABLE, "
-                              f"{s['corrupted']} CORRUPTED"),
-                "result":    "SUCCESS" if s["total"] > 0 else "NO_FILES",
+                              f"{s.get('valid', 0)} valid, "
+                              f"{s.get('repairable', 0)} repairable, "
+                              f"{s.get('corrupted', 0)} corrupted"),
+                "result":    "SUCCESS",
                 "analyst":   self.analyst,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "note":      "Files validated in-place; no copies created",
             }
         ))
 
         ptprint("\n" + "=" * 70, "TITLE", condition=self._out())
         ptprint("VALIDATION COMPLETE", "OK", condition=self._out())
-        ptprint(f"Total: {s['total']}  |  Valid: {s['valid']}  |  "
-                f"Repairable: {s['repairable']}  |  Corrupted: {s['corrupted']}"
-                + (f"  |  Rate: {rate}%" if rate else ""),
+        ptprint(f"Total: {s['total']}  |  Valid: {s.get('valid', 0)}  |  "
+                f"Repairable: {s.get('repairable', 0)}  |  "
+                f"Corrupted: {s.get('corrupted', 0)}",
                 "INFO", condition=self._out())
-        ptprint("Next: Repair Decision Point", "INFO", condition=self._out())
+        ptprint("NOTE: Files remain in consolidated dir – no copies created.",
+                "INFO", condition=self._out())
+        ptprint("Next: Repair Decision", "INFO", condition=self._out())
         ptprint("=" * 70, "TITLE", condition=self._out())
         self.ptjsonlib.set_status("finished")
-
-    def _write_text_report(self, props: Dict) -> Path:
-        txt = self.validation_dir / "VALIDATION_REPORT.txt"
-        self.validation_dir.mkdir(parents=True, exist_ok=True)
-        sep   = "=" * 70
-        lines = [sep, "PHOTO INTEGRITY VALIDATION REPORT", sep, "",
-                 f"Case ID:   {self.case_id}",
-                 f"Timestamp: {props.get('timestamp', '')}", "",
-                 "STATISTICS:",
-                 f"  Total files:     {props.get('totalFiles', 0)}",
-                 f"  VALID:           {props.get('validFiles', 0)}",
-                 f"  REPAIRABLE:      {props.get('repairableFiles', 0)}",
-                 f"  CORRUPTED:       {props.get('corruptedFiles', 0)}",
-                 *([] if props.get("validationRate") is None
-                   else [f"  Validation rate: {props['validationRate']}%"]),
-                 "", "BY FORMAT (VALID):"]
-        lines += [f"  {k.upper():8s}: {v}"
-                  for k, v in sorted(
-                      props.get("byFormat", {}).get("valid", {}).items())]
-        lines += ["", "BY FORMAT (REPAIRABLE):"]
-        lines += [f"  {k.upper():8s}: {v}"
-                  for k, v in sorted(
-                      props.get("byFormat", {}).get("repairable", {}).items())]
-        txt.write_text("\n".join(lines), encoding="utf-8")
-        return txt
 
     def save_report(self) -> Optional[str]:
         if self.args.json:
             ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
             return None
 
-        json_file = self.output_dir / f"{self.case_id}_validation_report.json"
-        report    = {
-            "result":         json.loads(self.ptjsonlib.get_result_json()),
-            "validatedFiles": self._results,
+        json_file = (Path(self.args.json_out) if self.args.json_out
+                     else self.output_dir /
+                          f"{self.case_id}_integrity_validation.json")
+        report = {
+            "result":      json.loads(self.ptjsonlib.get_result_json()),
+            "fileResults": self._results,
         }
         json_file.write_text(
             json.dumps(report, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
-        ptprint(f"JSON report: {json_file}", "OK", condition=self._out())
-
-        props = json.loads(self.ptjsonlib.get_result_json())["result"]["properties"]
-        txt   = self._write_text_report(props)
-        ptprint(f"Text report: {txt}", "OK", condition=self._out())
+        ptprint(f"JSON report: {json_file.name}", "OK", condition=self._out())
+        ptprint(f"  Contains path + status + corruptionType for "
+                f"{len(self._results)} files.",
+                "INFO", condition=self._out())
         return str(json_file)
 
 
@@ -373,33 +441,33 @@ class PtIntegrityValidation(ForensicToolBase):
 def get_help() -> List[Dict]:
     return [
         {"description": [
-            "Photo integrity validation – ptlibs compliant",
-            "Three-stage validation: size → file(1) → format-specific tool",
+            "Forensic file integrity validation – ptlibs compliant",
+            "Three-stage validation: file(1) + ImageMagick + format-specific tools",
+            "Validates files IN-PLACE (no copies created) – no extra disk space needed",
             "Compliant with NIST SP 800-86 and ISO/IEC 27037:2012",
         ]},
         {"usage": ["ptintegrityvalidation <case-id> [options]"]},
         {"usage_example": [
             "ptintegrityvalidation PHOTORECOVERY-2025-01-26-001",
-            "ptintegrityvalidation PHOTORECOVERY-2025-01-26-001 --dry-run",
+            "ptintegrityvalidation CASE-001 --dry-run",
+            "ptintegrityvalidation CASE-001 --json-out step10.json",
         ]},
         {"options": [
             ["case-id",            "",      "Forensic case identifier – REQUIRED"],
-            ["--consolidated-dir", "<dir>", "Consolidated dir (optional; auto-discovered)"],
-            ["-a", "--analyst",    "<n>",   "Analyst name (default: Analyst)"],
             ["-o", "--output-dir", "<dir>", f"Output directory (default: {DEFAULT_OUTPUT_DIR})"],
-            ["--dry-run",          "",      "Simulate without copying files"],
-            ["-j", "--json",       "",      "JSON output for platform integration"],
+            ["-a", "--analyst",    "<n>",   "Analyst name"],
+            ["-j", "--json-out",   "<f>",   "Save JSON report to file"],
             ["-q", "--quiet",      "",      "Suppress terminal output"],
+            ["--dry-run",          "",      "Simulate without reading files"],
             ["-h", "--help",       "",      "Show help"],
             ["--version",          "",      "Show version"],
         ]},
         {"notes": [
-            "VALID: passes all checks  |  REPAIRABLE: minor errors  |  "
-            "CORRUPTED: severe damage",
-            "JPEG: jpeginfo → identify (fallback)  |  PNG: pngcheck  |  "
-            "TIFF: tiffinfo  |  Other: identify",
-            "Output: valid/ | repairable/ | corrupted/ | VALIDATION_REPORT.txt",
-            "Compliant with NIST SP 800-86 and ISO/IEC 27037:2012",
+            "Stage 1 (required): file(1) + ImageMagick identify",
+            "Stage 2 (optional): jpeginfo | pngcheck | tiffinfo | PIL fallback",
+            "Output: {case_id}_integrity_validation.json with per-file classification",
+            "Files are NOT moved or copied – referenced by path only",
+            "Install optional tools: sudo apt install jpeginfo pngcheck libtiff-tools",
         ]},
     ]
 
@@ -407,13 +475,11 @@ def get_help() -> List[Dict]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("case_id")
-    parser.add_argument("--consolidated-dir", default=None,
-                        help="Path to consolidated dir (optional; auto-discovered if omitted)")
-    parser.add_argument("-a", "--analyst",    default="Analyst")
     parser.add_argument("-o", "--output-dir", default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("-a", "--analyst",    default="Analyst")
+    parser.add_argument("-j", "--json-out",   default=None)
     parser.add_argument("-q", "--quiet",      action="store_true")
     parser.add_argument("--dry-run",          action="store_true")
-    parser.add_argument("-j", "--json",       action="store_true")
     parser.add_argument("--version", action="version",
                         version=f"{SCRIPTNAME} {__version__}")
 
@@ -421,7 +487,8 @@ def parse_args() -> argparse.Namespace:
         ptprinthelper.help_print(get_help(), SCRIPTNAME, __version__)
         sys.exit(0)
 
-    args = parser.parse_args()
+    args      = parser.parse_args()
+    args.json = bool(args.json_out)
     if args.json:
         args.quiet = True
     ptprinthelper.print_banner(SCRIPTNAME, __version__, args.json)
