@@ -11,23 +11,15 @@
 """
 
 # LAST CHANGES:
-#   - FIXED disk space issue: original copied files into valid/repairable/
-#     corrupted/ subdirectories, creating a third copy of every file on disk.
-#     Now: files are validated IN-PLACE (in the consolidated directory from
-#     Step 9); the JSON report records the path and classification of each file.
-#     No files are moved or copied. The next step (ptrepairdecision) reads
-#     the JSON and works on files at their existing paths.
-#   - IMAGE_EXTENSIONS replaced with import from _constants
-#   - _validate_file() stage-1 and stage-2 now call self._validate_image_file()
-#     from ForensicToolBase for the basic checks; format-specific checks
-#     (jpeginfo, pngcheck, tiffinfo) remain here as they are more detailed
-#     than the base method and are not shared with other tools
-#   - Changed --json boolean flag to --json-out <file> for consistency
+#   - FIXED: validates files IN-PLACE (no third full disk copy created).
+#   - IMAGE_EXTENSIONS replaced with import from _constants.
+#   - Removed _custom_sigint_handler + signal.signal(): handled in base.
+#   - Replaced inline add_properties({5 common fields}) with _init_properties().
+#   - Changed --json boolean flag to --json-out <file> for consistency.
 
 import argparse
 import json
 import re
-import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,18 +31,10 @@ from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
-
 SCRIPTNAME         = "ptintegrityvalidation"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 VALIDATE_TIMEOUT   = 30
 
-# Corruption type → human-readable description
 CORRUPTION_TYPES: Dict[str, str] = {
     "missing_footer":   "Missing end marker (EOI/EOF)",
     "invalid_header":   "Invalid or corrupt file header",
@@ -63,16 +47,8 @@ CORRUPTION_TYPES: Dict[str, str] = {
 
 class PtIntegrityValidation(ForensicToolBase):
     """
-    Validates integrity of recovered image files using a three-stage approach:
-
-      Stage 1 – basic:    file(1) type check + ImageMagick identify
-                          (delegates to self._validate_image_file() in base)
-      Stage 2 – detailed: format-specific tools (jpeginfo, pngcheck, tiffinfo)
-      Stage 3 – classify: determine corruption type for REPAIRABLE files
-
-    Files are validated IN-PLACE in the consolidated directory (Step 9).
-    No files are moved or copied – the output is a JSON classification report
-    only. This avoids creating a third copy of every file on disk.
+    Validates integrity of recovered image files using a three-stage approach.
+    Files are validated IN-PLACE – no copies are created.
     """
 
     def __init__(self, args: argparse.Namespace) -> None:
@@ -84,7 +60,6 @@ class PtIntegrityValidation(ForensicToolBase):
         self.output_dir = Path(args.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Reads from consolidated dir (Step 9 output)
         self.consolidated_dir = self.output_dir / f"{self.case_id}_consolidated"
 
         self._s: Dict[str, Any] = {
@@ -93,24 +68,13 @@ class PtIntegrityValidation(ForensicToolBase):
         }
         self._results: List[Dict] = []
 
-        self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
-            "analyst":       self.analyst,
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "dryRun":        self.dry_run,
-        })
+        self._init_properties(__version__)
 
     # ------------------------------------------------------------------
     # Format-specific detailed validation (Stage 2)
     # ------------------------------------------------------------------
 
     def _validate_jpeg_detail(self, path: Path) -> Tuple[str, str]:
-        """
-        Use jpeginfo for detailed JPEG validation.
-        Returns (status, corruption_type) where status is 'valid' or
-        a corruption descriptor.
-        """
         r = self._run_command(["jpeginfo", "-c", str(path)], timeout=VALIDATE_TIMEOUT)
 
         if r["success"]:
@@ -124,7 +88,6 @@ class PtIntegrityValidation(ForensicToolBase):
             if "invalid marker" in out or "corrupt" in out:
                 return "repairable", "corrupt_segments"
 
-        # jpeginfo not available or returned error – try pillow
         try:
             from PIL import Image
             Image.MAX_IMAGE_PIXELS = None
@@ -141,7 +104,6 @@ class PtIntegrityValidation(ForensicToolBase):
                 return "repairable", "invalid_header"
             return "repairable", "corrupt_data"
 
-        # Fallback: try PIL with LOAD_TRUNCATED_IMAGES
         try:
             from PIL import Image, ImageFile
             ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -154,7 +116,6 @@ class PtIntegrityValidation(ForensicToolBase):
         return "corrupted", "unknown"
 
     def _validate_png_detail(self, path: Path) -> Tuple[str, str]:
-        """pngcheck for detailed PNG validation."""
         r = self._run_command(["pngcheck", "-v", str(path)],
                               timeout=VALIDATE_TIMEOUT)
         if r["success"]:
@@ -171,7 +132,6 @@ class PtIntegrityValidation(ForensicToolBase):
         return "corrupted", "unknown"
 
     def _validate_tiff_detail(self, path: Path) -> Tuple[str, str]:
-        """tiffinfo for detailed TIFF validation."""
         r = self._run_command(["tiffinfo", str(path)], timeout=VALIDATE_TIMEOUT)
         if r["success"]:
             return "valid", "none"
@@ -183,7 +143,6 @@ class PtIntegrityValidation(ForensicToolBase):
         return "corrupted", "unknown"
 
     def _validate_generic_detail(self, path: Path) -> Tuple[str, str]:
-        """Pillow fallback for formats without a dedicated validator."""
         try:
             from PIL import Image
             img = Image.open(str(path))
@@ -196,18 +155,12 @@ class PtIntegrityValidation(ForensicToolBase):
         return "corrupted", "unknown"
 
     # ------------------------------------------------------------------
-    # Full three-stage validation for a single file
+    # Full three-stage validation
     # ------------------------------------------------------------------
 
     def _validate_full(self, path: Path) -> Dict:
-        """
-        Run three-stage validation on a single file.
-        Returns a result dict with status, corruption_type, and info.
-        """
         ext = path.suffix.lower()
 
-        # Stage 1: _validate_image_file() from ForensicToolBase
-        # (size check → file(1) → ImageMagick identify)
         base_status, vinfo = self._validate_image_file(path)
 
         if base_status == "invalid":
@@ -222,7 +175,6 @@ class PtIntegrityValidation(ForensicToolBase):
             }
 
         if base_status == "valid":
-            # Stage 2: format-specific detailed check
             if ext in (".jpg", ".jpeg"):
                 det_status, ctype = self._validate_jpeg_detail(path)
             elif ext == ".png":
@@ -232,10 +184,8 @@ class PtIntegrityValidation(ForensicToolBase):
             else:
                 det_status, ctype = self._validate_generic_detail(path)
         else:
-            # base_status == "corrupted" – skip Stage 2
             det_status, ctype = "repairable", "corrupt_data"
 
-        # Map detailed status to canonical output status
         if det_status == "valid":
             final_status = "valid"
             ctype        = "none"
@@ -376,15 +326,15 @@ class PtIntegrityValidation(ForensicToolBase):
 
         s = self._s
         self.ptjsonlib.add_properties({
-            "compliance":       ["NIST SP 800-86", "ISO/IEC 27037:2012"],
-            "method":           "in_place_validation",
-            "totalFiles":       s["total"],
-            "validFiles":       s.get("valid", 0),
-            "repairableFiles":  s.get("repairable", 0),
-            "corruptedFiles":   s.get("corrupted", 0),
-            "corruptionTypes":  s["corruption_types"],
-            "byFormat":         s["by_format"],
-            "consolidatedDir":  str(self.consolidated_dir),
+            "compliance":      ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+            "method":          "in_place_validation",
+            "totalFiles":      s["total"],
+            "validFiles":      s.get("valid", 0),
+            "repairableFiles": s.get("repairable", 0),
+            "corruptedFiles":  s.get("corrupted", 0),
+            "corruptionTypes": s["corruption_types"],
+            "byFormat":        s["by_format"],
+            "consolidatedDir": str(self.consolidated_dir),
         })
         self.ptjsonlib.add_node(self.ptjsonlib.create_node_object(
             "chainOfCustodyEntry",
@@ -413,10 +363,6 @@ class PtIntegrityValidation(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        if self.args.json:
-            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-            return None
-
         json_file = (Path(self.args.json_out) if self.args.json_out
                      else self.output_dir /
                           f"{self.case_id}_integrity_validation.json")
@@ -427,6 +373,8 @@ class PtIntegrityValidation(ForensicToolBase):
         json_file.write_text(
             json.dumps(report, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
+        if self.args.json_out:
+            ptprint(self.ptjsonlib.get_result_json(), "", True)
         ptprint(f"JSON report: {json_file.name}", "OK", condition=self._out())
         ptprint(f"  Contains path + status + corruptionType for "
                 f"{len(self._results)} files.",

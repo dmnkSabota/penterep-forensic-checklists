@@ -14,9 +14,11 @@
 #   - IMAGE_EXTENSIONS, IMAGE_FILE_KEYWORDS, FORMAT_GROUPS replaced with
 #     imports from _constants (single source of truth)
 #   - _validate_image() removed; replaced by self._validate_image_file()
-#     inherited from ForensicToolBase (was duplicated in ptfilecarving too)
-#   - Changed --json boolean flag to --json-out <file> for consistency with
-#     all other tools in the scenario
+#     inherited from ForensicToolBase
+#   - Changed --json boolean flag to --json-out <file> for consistency
+#   - Removed _custom_sigint_handler + signal.signal(): handled in base.
+#   - Replaced inline add_properties({5 fields}) with _init_properties()
+#     + separate add_properties for outputDirectory.
 
 import argparse
 import json
@@ -34,22 +36,12 @@ from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
-import signal
-
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
-
 SCRIPTNAME         = "ptfilesystemrecovery"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 FLS_TIMEOUT        = 1800
 ICAT_TIMEOUT       = 60
 EXIF_TIMEOUT       = 30
 
-# Matches fls output lines: "r/r [* ]inode[-alloc]: path"
 _FLS_LINE = re.compile(r"^\S+\s+\*?\s*(\d+)(?:-\d+)?:\s+(.+)$")
 
 
@@ -64,6 +56,7 @@ class PtFilesystemRecovery(ForensicToolBase):
         self.ptjsonlib  = ptjsonlib.PtJsonLib()
         self.args       = args
         self.case_id    = args.case_id.strip()
+        self.analyst    = getattr(args, "analyst", "Analyst")
         self.dry_run    = args.dry_run
         self.force      = args.force
         self.output_dir = Path(args.output_dir)
@@ -85,13 +78,8 @@ class PtFilesystemRecovery(ForensicToolBase):
         }
         self._recovered_files: List[Dict] = []
 
-        self.ptjsonlib.add_properties({
-            "caseId":          self.case_id,
-            "outputDirectory": str(self.output_dir),
-            "timestamp":       datetime.now(timezone.utc).isoformat(),
-            "scriptVersion":   __version__,
-            "dryRun":          self.dry_run,
-        })
+        self._init_properties(__version__)
+        self.ptjsonlib.add_properties({"outputDirectory": str(self.output_dir)})
 
     # ------------------------------------------------------------------
     # Helpers
@@ -321,7 +309,6 @@ class PtFilesystemRecovery(ForensicToolBase):
                 self._s["invalid"] += 1; continue
             self._s["extracted"] += 1
 
-            # _validate_image_file() is now defined in ForensicToolBase
             status, vinfo = self._validate_image_file(extracted)
 
             if status == "valid":
@@ -414,7 +401,7 @@ class PtFilesystemRecovery(ForensicToolBase):
                 "action":    (f"Filesystem-based photo recovery complete – "
                               f"{s['valid']} valid files recovered"),
                 "result":    "SUCCESS" if s["valid"] > 0 else "NO_FILES",
-                "analyst":   self.args.analyst,
+                "analyst":   self.analyst,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         ))
@@ -467,11 +454,8 @@ class PtFilesystemRecovery(ForensicToolBase):
         return txt
 
     def save_report(self) -> Optional[str]:
-        if self.args.json:
-            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-            return None
-
-        json_file = self.output_dir / f"{self.case_id}_recovery_report.json"
+        json_file = (Path(self.args.json_out) if self.args.json_out
+                     else self.output_dir / f"{self.case_id}_recovery_report.json")
         report    = {
             "result": json.loads(self.ptjsonlib.get_result_json()),
             "recoveredFiles": self._recovered_files,
@@ -485,6 +469,8 @@ class PtFilesystemRecovery(ForensicToolBase):
         json_file.write_text(
             json.dumps(report, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
+        if self.args.json_out:
+            ptprint(self.ptjsonlib.get_result_json(), "", True)
         ptprint(f"JSON report: {json_file}", "OK", condition=self._out())
 
         props = json.loads(self.ptjsonlib.get_result_json())["result"]["properties"]

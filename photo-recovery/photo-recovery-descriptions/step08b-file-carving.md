@@ -22,6 +22,8 @@ File carving vyhľadáva súbory priamo v raw dátach forenzného obrazu podľa 
 
 Vykonáva sa pri stratégii `file_carving` alebo `hybrid` (určenej analýzou súborového systému). Pri stratégii `filesystem_scan` tento krok preskočte.
 
+Skript `ptfilecarving` spúšťa PhotoRec v neinteraktívnom dávkovom režime – bez nutnosti manuálneho prechádzania menu. Filtrovanie obrazových formátov prebieha post-carving počas validácie, nie v samotnom PhotoRec príkaze.
+
 ## Jak na to
 
 **1. Overenie stratégie a príprava:**
@@ -30,84 +32,52 @@ Z výstupu analýzy súborového systému skontrolujte odporúčanú stratégiu 
 
 Overte dostupnosť nástrojov:
 ```bash
-which photorec file identify exiftool
+which photorec file identify
 ```
 Inštalácia (ak chýbajú):
 ```bash
-sudo apt-get install testdisk imagemagick libimage-exiftool-perl
+sudo apt-get install testdisk imagemagick
 ```
 
-Nastavte premenné:
+**2. Spustenie skriptu:**
+
 ```bash
 CASE_ID="PHOTORECOVERY-2025-01-26-001"
-IMAGE="/forenzne/pripady/${CASE_ID}/${CASE_ID}.dd"
-OUTPUT_DIR="/forenzne/pripady/${CASE_ID}/${CASE_ID}_carved"
-mkdir -p "${OUTPUT_DIR}"
+
+# Iba terminálový výstup
+ptfilecarving ${CASE_ID}
+
+# S JSON výstupom pre case.json
+ptfilecarving ${CASE_ID} --analyst "Meno Analytika" --json-out ${CASE_ID}_carving.json
+
+# Explicitné zadanie cesty k obrazu (ak analysis file nie je dostupný)
+ptfilecarving ${CASE_ID} --image /var/forensics/images/${CASE_ID}.dd --json-out ${CASE_ID}_carving.json
+
+# Simulácia bez spustenia PhotoRec
+ptfilecarving ${CASE_ID} --dry-run
 ```
 
-**2. Spustenie PhotoRec:**
+Skript automaticky načíta cestu k forenzného obrazu z `{CASE_ID}_filesystem_analysis.json` vytvoreného v predchádzajúcom kroku.
 
-PhotoRec je interaktívny nástroj – spustite ho a prejdite nastavením:
+**3. Priebeh file carving:**
+
+PhotoRec beží v neinteraktívnom dávkovom režime – spúšťa sa automaticky bez nutnosti manuálneho výberu v menu:
 ```bash
-photorec "${IMAGE}"
-```
-V interaktívnom menu:
-- Vyberte forenzný obraz ako zdroj
-- Nastavte cieľový adresár na `${OUTPUT_DIR}`
-- V „File Formats" ponechajte len obrazové formáty: jpg, png, tiff, bmp, gif, raw, cr2, nef, arw, dng
-- Spustite sken (5 minút – 8 hodín podľa veľkosti média)
-
-PhotoRec ukladá výsledky do adresárov `recup_dir.*` v cieľovom adresári.
-
-**3. Validácia nájdených súborov:**
-
-Pre každý nájdený súbor v `recup_dir.*` vykonajte kontrolu:
-
-Minimálna veľkosť:
-```bash
-find "${OUTPUT_DIR}" -name "*.jpg" -empty -delete
+photorec /log /d <pracovny_adresar> /cmd <forenzny_obraz> search
 ```
 
-Typ obsahu:
-```bash
-file -b subor     # musí vrátiť typ obrazu, nie "data"
-```
+PhotoRec obnoví všetky typy súborov, ktoré v obraze nájde – filtrovanie na obrazové formáty prebieha v nasledujúcom kroku validácie. Výstup postupu sa priebežne zobrazuje na terminál a zaznamenáva do log súboru `{CASE_ID}_photorec.log`. Čas behu závisí od veľkosti média (5 minút až 8 hodín).
 
-Čitateľnosť:
-```bash
-identify subor    # ImageMagick – musí prejsť bez chyby
-```
+**4. Validácia a deduplikácia:**
 
-Platné súbory presuňte do `${OUTPUT_DIR}/organized/`, neplatné do `${OUTPUT_DIR}/corrupted/`.
+Po dokončení PhotoRec skript automaticky:
+- Prefiltruje nájdené súbory podľa prípony (len obrazové formáty z `IMAGE_EXTENSIONS`)
+- Pre každý kandidát vykoná SHA-256 deduplikáciu (duplicitné súbory presunie do `duplicates/`)
+- Validuje každý unikátny súbor: `file -b` → `identify` (ImageMagick)
+- Platné súbory presunie do `valid/<format>/` (jpg/, png/, tiff/, raw/, other/)
+- Poškodené súbory presunie do `corrupted/`
 
-**4. Deduplikácia (SHA-256):**
-
-Pre každý platný súbor vypočítajte hash:
-```bash
-sha256sum "${OUTPUT_DIR}/organized/"* | sort > /tmp/carved_hashes.txt
-```
-Duplicitné súbory (rovnaký hash) presuňte do `${OUTPUT_DIR}/duplicates/` – zachovajte pre auditné účely.
-
-**5. Organizácia a premenovanie:**
-
-Platné unikátne súbory usporiadajte do podadresárov podľa formátu a premenujte na systematický formát:
-```
-${OUTPUT_DIR}/organized/
-├── jpg/    →  ${CASE_ID}_jpg_000001.jpg, ...
-├── png/    →  ${CASE_ID}_png_000001.png, ...
-├── tiff/
-├── raw/
-└── other/
-```
-
-**6. EXIF extrakcia:**
-
-Pre každý platný súbor extrahujte EXIF metadáta:
-```bash
-exiftool -json subor > "${OUTPUT_DIR}/metadata/nazov_suboru.json"
-```
-
-**7. Zápis výsledkov a aktualizácia CoC:**
+**5. Zápis výsledkov a aktualizácia CoC:**
 
 Zapíšte výsledky file carving do dokumentácie prípadu:
 - Metóda obnovy – file_carving / hybrid
@@ -117,7 +87,6 @@ Zapíšte výsledky file carving do dokumentácie prípadu:
 - Počet duplikátov
 - Miera validácie (%)
 - Miera duplikácie (%)
-- Extrakcia metadát – áno / nie
 
 Pridajte záznam do Chain of Custody:
 ```json
@@ -128,15 +97,16 @@ Pridajte záznam do Chain of Custody:
 }
 ```
 
-**8. Archivácia výstupov:**
+**6. Archivácia výstupov:**
 
 Archivujte do dokumentácie prípadu:
 - `${CASE_ID}_carving_report.json` – kompletný report obnovy
-- `CARVING_REPORT.txt` – textový katalóg súborov a štatistiky
+- `${CASE_ID}_photorec.log` – log PhotoRec behu
+- Adresár `${CASE_ID}_carved/` s organizovanými súbormi
 
 ## Výsledek
 
-Obnovené súbory organizované podľa formátu v `${CASE_ID}_carved/organized/` (jpg/, png/, tiff/, raw/, other/), poškodené v `corrupted/`, duplikáty v `duplicates/`. Zachované: EXIF metadáta a obsah fotografií. Stratené: pôvodné názvy súborov, adresárová štruktúra a FS timestamps. Výsledky zaznamenané v dokumentácii prípadu. Workflow pokračuje do konsolidácie fotografií.
+Obnovené súbory organizované podľa formátu v `${CASE_ID}_carved/valid/<format>/` (jpg/, png/, tiff/, raw/, other/), poškodené v `corrupted/`, duplikáty v `duplicates/`. Zachované: obsah fotografií. Stratené: pôvodné názvy súborov, adresárová štruktúra a FS timestamps. Výsledky zaznamenané v dokumentácii prípadu. Workflow pokračuje do konsolidácie fotografií.
 
 ## Reference
 

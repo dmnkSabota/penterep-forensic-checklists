@@ -18,15 +18,13 @@ Jednoduchá
 
 ## Popis
 
-Nástroj dostane cestu k adresáru s validnými súbormi z Validácie integrity fotografií a voliteľne cestu k adresáru s opravenými súbormi z Opravy fotografií. Dávkovo extrahuje EXIF metadáta pomocou `exiftool` a vykoná analýzu časovej osi, zariadení, GPS súradníc a detekciu upravených fotografií. Poškodené a neopraviteľné súbory sú vynechané. Ak Oprava fotografií prebehla so stratégiou `skip_repair`, `--repaired-dir` sa jednoducho neuvádza.
+Nástroj dávkovo extrahuje EXIF metadáta pomocou `exiftool` zo všetkých obrazových súborov v konsolidovanom adresári (výstup kroku 9). Vykoná analýzu časovej osi, zoznam zariadení, GPS súradnice a detekciu anomálií (budúci dátum záznamu, neobvyklé ISO, zmena po vytvorení). Poškodené a neopraviteľné súbory sú vynechané.
 
 ## Jak na to
 
 **1. Overenie predchádzajúcich výstupov:**
 
-Poznačte si:
-- Cestu k adresáru s validnými súbormi z Validácie integrity fotografií (napr. `{CASE_ID}_validation/valid/`)
-- Ak prebehla Oprava fotografií, cestu k opravenému adresáru (napr. `{CASE_ID}_repair/repaired/`)
+Poznačte si cestu ku konsolidovanému adresáru – štandardne `{CASE_ID}_consolidated/` v output adresári. Ak prebehla oprava fotografií, opravené súbory v `{CASE_ID}_repaired/` sú umiestnené oddelene a je potrebné ich zahrnúť cez `--source-dir`.
 
 **2. Inštalácia závislostí:**
 
@@ -38,44 +36,31 @@ sudo apt-get install libimage-exiftool-perl
 
 ```bash
 CASE_ID="PHOTORECOVERY-2025-01-26-001"
-VALID="/var/forensics/images/${CASE_ID}_validation/valid"
-REPAIRED="/var/forensics/images/${CASE_ID}_repair/repaired"
 
-# Iba validné súbory (bez predchádzajúcej opravy)
-ptexifanalysis ${CASE_ID} --valid-dir ${VALID}
-
-# Validné aj opravené súbory
-ptexifanalysis ${CASE_ID} --valid-dir ${VALID} --repaired-dir ${REPAIRED}
+# Štandardné spustenie – číta z {CASE_ID}_consolidated/
+ptexifanalysis ${CASE_ID}
 
 # S JSON výstupom
-ptexifanalysis ${CASE_ID} --valid-dir ${VALID} --repaired-dir ${REPAIRED} \
+ptexifanalysis ${CASE_ID} --analyst "Meno Analytika" --json-out ${CASE_ID}_exif_result.json
+
+# Explicitná cesta k adresáru (napr. ak opravené súbory sú v inom adresári)
+ptexifanalysis ${CASE_ID} \
+  --source-dir /var/forensics/images/${CASE_ID}_consolidated \
   --analyst "Meno Analytika" --json-out ${CASE_ID}_exif_result.json
 
 # Simulácia bez exiftool
-ptexifanalysis ${CASE_ID} --valid-dir ${VALID} --dry-run
+ptexifanalysis ${CASE_ID} --dry-run
 ```
 
-Nástroj automaticky:
-- Overí existenciu vstupných adresárov
-- Dávkovo extrahuje EXIF (50 súborov na volanie exiftool)
-- Zostaví časovú os, zoznam zariadení, GPS súradnice
-- Detekuje editačný softvér a anomálie
-- Vygeneruje JSON databázu, CSV export a textový report
-
-Exit kódy:
-- `0` – aspoň jeden súbor s EXIF dátami
-- `1` – žiadne EXIF dáta nenájdené
-- `99` – chyba (chýbajúci vstup, exiftool nedostupný)
-- `130` – prerušené užívateľom (Ctrl+C)
+Nástroj automaticky prehľadáva rekurzívne zadaný adresár. Spracovanie prebieha v dávkach po 50 súborov na jedno volanie `exiftool` pre efektivitu.
 
 **4. Manuálna analýza (záložná metóda):**
 
 Ak automatický nástroj nie je dostupný, použite priame príkazy.
 
-Nastavenie premenných:
 ```bash
 CASE_ID="PHOTORECOVERY-2025-01-26-001"
-VALID="/var/forensics/images/${CASE_ID}_validation/valid"
+SOURCE="/var/forensics/images/${CASE_ID}_consolidated"
 EXIF_DIR="/var/forensics/images/${CASE_ID}_exif_analysis"
 mkdir -p "${EXIF_DIR}"
 ```
@@ -83,122 +68,43 @@ mkdir -p "${EXIF_DIR}"
 **Dávková extrakcia EXIF do JSON:**
 ```bash
 exiftool -j -G -a -s -n \
-    "${VALID}/" \
+    "${SOURCE}/" \
     > "${EXIF_DIR}/${CASE_ID}_exif_database.json"
 ```
 
 **CSV export pre tabuľkový editor:**
 ```bash
 exiftool -csv -G -a \
-    "${VALID}/" \
+    "${SOURCE}/" \
     > "${EXIF_DIR}/${CASE_ID}_exif_data.csv"
 ```
 
 **Analýza časovej osi – zoskupenie podľa dátumu:**
 ```bash
-exiftool -DateTimeOriginal -T -r "${VALID}/" \
+exiftool -DateTimeOriginal -T -r "${SOURCE}/" \
     | sort | uniq -c | sort -rn
 ```
 
 **Zoznam zariadení:**
 ```bash
-exiftool -Make -Model -T -r "${VALID}/" \
+exiftool -Make -Model -T -r "${SOURCE}/" \
     | sort | uniq -c | sort -rn
 ```
 
 **GPS súradnice:**
 ```bash
-exiftool -GPSLatitude -GPSLongitude -FileName -T -r "${VALID}/" \
+exiftool -GPSLatitude -GPSLongitude -FileName -T -r "${SOURCE}/" \
     | grep -v "^-"
 ```
 
 **Detekcia editačného softvéru:**
 ```bash
-exiftool -Software -FileName -T -r "${VALID}/" \
+exiftool -Software -FileName -T -r "${SOURCE}/" \
     | grep -iv "^-" \
-    | grep -i "photoshop\|lightroom\|gimp\|instagram\|snapseed"
+    | grep -i "photoshop\|lightroom\|gimp\|affinity\|instagram\|snapseed\|vsco\|facetune"
 ```
 
-**Anomálie – dátumy v budúcnosti:**
-```bash
-YEAR=$(date +%Y)
-exiftool -DateTimeOriginal -FileName -T -r "${VALID}/" \
-    | awk -F'\t' -v yr="$YEAR" '$1 > yr":00:00 00:00:00" {print $0}'
-```
-
-**5. JSON výstup:**
-
-Pri použití `--json-out` nástroj vytvorí štruktúrovaný report:
-
-```json
-{
-  "result": {
-    "properties": {
-      "caseId": "PHOTORECOVERY-2025-01-26-001",
-      "analyst": "Meno Analytika",
-      "timestamp": "2025-01-26T17:30:00Z",
-      "compliance": ["NIST SP 800-86", "EXIF 2.32", "CIPA DC-008-2019"],
-      "totalFiles": 847,
-      "filesWithExif": 812,
-      "filesWithoutExif": 35,
-      "withDatetime": 798,
-      "withGps": 423,
-      "editedPhotos": 14,
-      "anomalies": 3,
-      "uniqueCameras": 4,
-      "qualityScore": "excellent",
-      "qualityPct": 98.2,
-      "dateRange": {
-        "earliest": "2024-03-15 08:22:11",
-        "latest":   "2025-01-20 18:45:03",
-        "spanDays": 311
-      },
-      "byCamera": {
-        "Apple iPhone 15 Pro": 541,
-        "Samsung Galaxy S24":  198,
-        "Canon EOS R6":         63,
-        "Unknown":              10
-      },
-      "settingsRange": {
-        "iso":         {"min": 20,   "max": 6400,  "avg": 312.4},
-        "aperture":    {"min": 1.8,  "max": 22.0,  "avg": 4.2},
-        "focalLength": {"min": 13.0, "max": 200.0, "avg": 38.7}
-      }
-    }
-  },
-  "exifData": [
-    {
-      "fileId": 1,
-      "filename": "IMG_0042.jpg",
-      "make": "Apple",
-      "model": "iPhone 15 Pro",
-      "datetimeOriginal": "2025:01:15 14:32:07",
-      "iso": 64,
-      "fNumber": 1.78,
-      "focalLength": 6.86,
-      "gpsLatitude": 48.1482,
-      "gpsLongitude": 17.1067,
-      "software": null,
-      "edited": false
-    }
-  ],
-  "editedPhotos": [
-    {
-      "filename": "IMG_0731.jpg",
-      "software": "Adobe Lightroom 7.0"
-    }
-  ],
-  "anomalies": [
-    {
-      "filename": "IMG_0099.jpg",
-      "type": "future_date",
-      "detail": "DateTimeOriginal in future: 2027-03-01"
-    }
-  ]
-}
-```
-
-**6. Zápis výsledkov a aktualizácia CoC:**
+**5. Zápis výsledkov a aktualizácia CoC:**
 
 Zapíšte výsledky do dokumentácie prípadu:
 - Celkový počet spracovaných súborov
@@ -206,34 +112,32 @@ Zapíšte výsledky do dokumentácie prípadu:
 - Počet súborov s `DateTimeOriginal`
 - Počet súborov s GPS súradnicami
 - Počet unikátnych zariadení
-- Počet upravených fotografií
-- Počet detekovaných anomálií
-- EXIF quality score (excellent / good / fair / poor)
+- Počet detekovaných anomálií (future_date, unusual_iso, modify_after_original)
 
 Pridajte záznam do Chain of Custody:
 ```json
 {
   "timestamp": "2025-01-26T17:30:00Z",
   "analyst": "Meno Analytika",
-  "action": "EXIF analýza dokončená – 812 EXIF-pozitívnych súborov, quality: excellent"
+  "action": "EXIF analýza dokončená – N EXIF-pozitívnych súborov, M anomálií"
 }
 ```
 
-**7. Archivácia výstupov:**
+**6. Archivácia výstupov:**
 
 Archivujte do dokumentácie prípadu:
-- `${CASE_ID}_exif_database.json` – kompletná EXIF databáza s per-file metadátami
-- `${CASE_ID}_exif_data.csv` – Excel-kompatibilný export
-- `${CASE_ID}_EXIF_REPORT.txt` – textový súhrn (časová os, zariadenia, GPS, anomálie)
+- `${CASE_ID}_exif_analysis.json` – kompletná EXIF databáza s per-file metadátami a anomáliami
 
 ## Výsledek
 
-Kompletná EXIF databáza s per-file metadátami, časovou osou a GPS zoznamom. CSV export pre ďalšie spracovanie. Výsledky zaznamenané v dokumentácii prípadu. Workflow pokračuje na Záverečný report.
+Kompletná EXIF databáza s per-file metadátami, časovou osou, GPS zoznamom a detekovanými anomáliami. Výsledky zaznamenané v dokumentácii prípadu. Workflow pokračuje na záverečný forenzný report.
 
 ## Reference
 
 EXIF 2.32 Specification (CIPA DC-008-2019)
 ISO 12234-2:2001 – Electronic still-picture imaging
+Farid, H. (2016). Photo Forensics. MIT Press, Ch. 3–4.
+Casey, E. (2011). Digital Evidence and Computer Crime (3rd ed.), Elsevier, Ch. 14.
 ExifTool Documentation (https://exiftool.org)
 
 ## Stav

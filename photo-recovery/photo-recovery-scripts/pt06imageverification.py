@@ -11,17 +11,19 @@
 """
 
 # LAST CHANGES:
-#   - Fixed save_report(): original always saved a JSON file regardless of
-#     whether --json-out was provided. This was inconsistent with all other
-#     tools. Now: saves only when --json-out is provided (or auto-save to
-#     default path when in human mode, matching the pattern of steps 7–13).
-#   - Fixed save_report(): same JSON-to-stdout-instead-of-file bug as
-#     ptmediareadability.
+#   - Fixed save_report(): when --json-out was provided (args.json=True),
+#     the original code only printed JSON to stdout and returned None without
+#     saving to the file – the user-specified path was never written.
+#     Now: always saves (to json_out path if provided, else default path)
+#     and additionally prints to stdout in JSON mode for platform integration.
+#   - Removed _custom_sigint_handler + signal.signal(): now handled once
+#     at module level in ptforensictoolbase.
+#   - Replaced inline ptjsonlib.add_properties({5 common fields}) in __init__
+#     with self._init_properties(__version__); imagePath added separately.
 
 import argparse
 import hashlib
 import json
-import signal
 import sys
 import time
 from datetime import datetime, timezone
@@ -32,13 +34,6 @@ from ._version import __version__
 from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
-
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
 
 SCRIPTNAME         = "ptimageverification"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
@@ -69,14 +64,8 @@ class PtImageVerification(ForensicToolBase):
         self.calc_time:    Optional[float] = None
         self.hash_match:   Optional[bool]  = None
 
-        self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
-            "analyst":       self.analyst,
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "imagePath":     str(self.image_path),
-            "dryRun":        self.dry_run,
-        })
+        self._init_properties(__version__)
+        self.ptjsonlib.add_properties({"imagePath": str(self.image_path)})
 
     # ------------------------------------------------------------------
     # Phases
@@ -292,21 +281,23 @@ class PtImageVerification(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        # FIX: original always saved to a default path regardless of --json-out.
-        # Updated to match the pattern of all other tools:
-        #   - --json-out <file>: save to file + print JSON to stdout
-        #   - no --json-out: save to default path (forensic record is important
-        #     for verification – always preserve the result)
-        if self.args.json:
-            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-            return None
-
+        # FIX: original branched on args.json (True when --json-out provided)
+        # and in that branch only printed to stdout, never saved to the file.
+        # Now: always saves (json_out path if given, else default path) and
+        # additionally prints raw JSON to stdout in JSON mode for platform
+        # integration. Pattern is now consistent with ptmediareadability.
         json_file = (Path(self.args.json_out) if self.args.json_out
-                     else self.output_dir / f"{self.case_id}_verification_report.json")
+                     else self.output_dir /
+                          f"{self.case_id}_verification_report.json")
+
         json_file.write_text(
             json.dumps({"result": json.loads(self.ptjsonlib.get_result_json())},
                        indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
+
+        if self.args.json:
+            ptprint(self.ptjsonlib.get_result_json(), "", True)
+
         ptprint(f"JSON report: {json_file.name}", "OK", condition=self._out())
 
         if self.image_hash and not self.dry_run:

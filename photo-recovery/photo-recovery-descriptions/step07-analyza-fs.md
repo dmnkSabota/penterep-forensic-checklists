@@ -28,7 +28,7 @@ Všetky príkazy pracujú výhradne s forenzným obrazom – originálne médium
 
 **1. Zistenie cesty k obrazu:**
 
-Pozrite sa do výstupu z hash verification a zapíšte si cestu k forenzne mu obrazu. Typicky:
+Pozrite sa do výstupu z hash verification a zapíšte si cestu k forenzného obrazu. Typicky:
 ```
 /var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd
 ```
@@ -41,7 +41,7 @@ IMAGE="/var/forensics/images/${CASE_ID}.dd"
 
 ptfilesystemanalysis ${CASE_ID} ${IMAGE} \
   --analyst "Meno Analytika" \
-  --output ${CASE_ID}_filesystem_analysis.json
+  --json-out ${CASE_ID}_filesystem_analysis.json
 ```
 
 Nástroj automaticky:
@@ -165,7 +165,7 @@ Uložte textový výstup príkazov mmls, fsstat a fls do súboru `${CASE_ID}_fil
 
 ## Výsledok
 
-Typ súborového systému identifikovaný, stav a čitateľnosť adresárovej štruktúry overené. Výsledky zaznamenané v JSON súbore vrátane partition table, FS typu, počtu obrazových súborov a zvolenej recovery stratégie. 
+Typ súborového systému identifikovaný, stav a čitateľnosť adresárovej štruktúry overené. Výsledky zaznamenané v JSON súbore vrátane partition table, FS typu, počtu obrazových súborov a zvolenej recovery stratégie.
 
 **Ďalší krok závisí od stratégie:**
 - `filesystem_scan` → Filesystem Recovery

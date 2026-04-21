@@ -48,7 +48,7 @@ ptimageverification ${CASE_ID} ${IMAGE} ${SOURCE_HASH} --analyst "Meno Analytika
 # S JSON výstupom
 ptimageverification ${CASE_ID} ${IMAGE} ${SOURCE_HASH} \
   --analyst "Meno Analytika" \
-  --output ${CASE_ID}_verification.json
+  --json-out ${CASE_ID}_verification.json
 ```
 
 Nástroj automaticky:
@@ -104,7 +104,7 @@ Výstup by mal byť: `PHOTORECOVERY-2025-01-26-001.dd: OK`
 
 **6. JSON output (voliteľné):**
 
-Pri použití `--output` sa vytvorí JSON s forensic metadata:
+Pri použití `--json-out` sa vytvorí JSON s forensic metadata:
 
 ```json
 {

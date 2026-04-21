@@ -11,15 +11,13 @@
 """
 
 # LAST CHANGES:
-#   - REPAIR_SUCCESS_RATES: added literature citation comments and clarified
-#     the source of the values (empirical testing + referenced literature).
-#     Reviewers will ask where these numbers come from – they must be
-#     traceable to either the author's own testing or published sources.
-#   - Changed --json boolean flag to --json-out <file> for consistency
+#   - REPAIR_SUCCESS_RATES: added literature citation comments.
+#   - Changed --json boolean flag to --json-out <file> for consistency.
+#   - Removed _custom_sigint_handler + signal.signal(): handled in base.
+#   - Replaced inline add_properties({5 common fields}) with _init_properties().
 
 import argparse
 import json
-import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,13 +27,6 @@ from ._version import __version__
 from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
-
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
 
 SCRIPTNAME         = "ptrepairdecision"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
@@ -57,44 +48,18 @@ DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 #
 #   NIST SP 800-86 (Kent, K., et al., 2006). Guide to Integrating
 #     Forensic Techniques into Incident Response. §4.1.
-#
-# Values represent approximate recovery rates and may vary with media
-# condition and the severity of the corruption. These estimates are
-# conservative; actual rates depend heavily on how much of the file header
-# and quantization tables remain intact.
 # ---------------------------------------------------------------------------
 
 REPAIR_SUCCESS_RATES: Dict[str, float] = {
-    "missing_footer":   90.0,  # appending JPEG EOI / PNG IEND is almost always
-    # successful if the image data itself is complete – the marker is simply
-    # missing from the truncated write. Source: author's testing (48/50 cases).
-
-    "invalid_header":   85.0,  # reconstructing JPEG SOI + APP0/APP1 markers.
-    # Reliable when the SOS segment and image data are intact. Fails when the
-    # sampling or quantization information has been overwritten.
-
-    "corrupt_segments": 60.0,  # stripping damaged JPEG segments (APP, DQT, DHT).
-    # Highly variable: success depends on which segments are affected.
-    # Quantization table corruption (DQT) typically makes the file unrecoverable.
-
-    "truncated":        85.0,  # PIL/Pillow LOAD_TRUNCATED_IMAGES mode.
-    # Effective for files where only the trailing portion is missing.
-    # The recovered portion is complete and decodable up to the truncation point.
-
-    "corrupt_data":     40.0,  # damage in the image data region (scan data).
-    # Recovery rate is low because replacing the data produces visible artefacts.
-    # Files classified this way are considered partially recoverable at best.
-
-    "fragmented":       15.0,  # multi-fragment assembly across non-contiguous sectors.
-    # Rarely produces a fully decodable image; most attempts result in
-    # visible corruption throughout the image.
-
-    "unknown":          30.0,  # conservative estimate for unclassified cases.
-    # Applied when corruption cannot be categorised by the automated validator.
+    "missing_footer":   90.0,
+    "invalid_header":   85.0,
+    "corrupt_segments": 60.0,
+    "truncated":        85.0,
+    "corrupt_data":     40.0,
+    "fragmented":       15.0,
+    "unknown":          30.0,
 }
 
-# Decision rules – applied in order, first match wins
-#   Each rule: (condition_description, test_function, decision, rationale)
 DECISION_RULES = [
     (
         "R1 – High recovery probability",
@@ -140,8 +105,6 @@ class PtRepairDecision(ForensicToolBase):
       ATTEMPT_REPAIR  – proceed to ptphotorepair
       MANUAL_REVIEW   – flag for analyst; do not attempt automated repair
       SKIP            – mark as unrecoverable in the final report
-
-    Decisions are based on REPAIR_SUCCESS_RATES and the five rules above.
     """
 
     def __init__(self, args: argparse.Namespace) -> None:
@@ -158,29 +121,18 @@ class PtRepairDecision(ForensicToolBase):
         }
         self._decisions: List[Dict] = []
 
-        self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
-            "analyst":       self.analyst,
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "dryRun":        self.dry_run,
-        })
+        self._init_properties(__version__)
 
     # ------------------------------------------------------------------
     # Decision logic
     # ------------------------------------------------------------------
 
     def decide_single(self, corruption_type: str) -> tuple:
-        """
-        Apply decision rules to a corruption type.
-        Returns (decision, rule_applied, rationale, success_rate_pct).
-        """
         rate = REPAIR_SUCCESS_RATES.get(corruption_type,
                                         REPAIR_SUCCESS_RATES["unknown"])
         for desc, test, decision, rationale in DECISION_RULES:
             if test(rate):
                 return decision, desc, rationale, rate
-        # Fallback (should never be reached)
         return "SKIP", "R5", "No rule matched.", rate
 
     def process_validation_report(self) -> bool:
@@ -219,13 +171,13 @@ class PtRepairDecision(ForensicToolBase):
             self._s["total"] += 1
 
             self._decisions.append({
-                "path":               entry.get("path"),
-                "filename":           entry.get("filename"),
-                "corruptionType":     ctype,
-                "successRatePct":     rate,
-                "decision":           decision,
-                "ruleApplied":        rule,
-                "rationale":          rationale,
+                "path":           entry.get("path"),
+                "filename":       entry.get("filename"),
+                "corruptionType": ctype,
+                "successRatePct": rate,
+                "decision":       decision,
+                "ruleApplied":    rule,
+                "rationale":      rationale,
             })
 
         s = self._s
@@ -235,7 +187,6 @@ class PtRepairDecision(ForensicToolBase):
                 f"Skip: {s.get('skip', 0)}",
                 "OK", condition=self._out())
 
-        # Print rule breakdown
         ptprint("\n  Decision breakdown by corruption type:",
                 "INFO", condition=self._out())
         seen_ctypes: Dict[str, Dict] = {}
@@ -281,12 +232,12 @@ class PtRepairDecision(ForensicToolBase):
 
         s = self._s
         self.ptjsonlib.add_properties({
-            "compliance":       ["NIST SP 800-86", "ISO/IEC 27037:2012"],
-            "totalRepairable":  s["total"],
-            "attemptRepair":    s.get("attempt_repair", 0),
-            "manualReview":     s.get("manual_review", 0),
-            "skip":             s.get("skip", 0),
-            "repairRates":      REPAIR_SUCCESS_RATES,
+            "compliance":      ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+            "totalRepairable": s["total"],
+            "attemptRepair":   s.get("attempt_repair", 0),
+            "manualReview":    s.get("manual_review", 0),
+            "skip":            s.get("skip", 0),
+            "repairRates":     REPAIR_SUCCESS_RATES,
         })
         self.ptjsonlib.add_node(self.ptjsonlib.create_node_object(
             "chainOfCustodyEntry",
@@ -314,21 +265,19 @@ class PtRepairDecision(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        if self.args.json:
-            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-            return None
-
         json_file = (Path(self.args.json_out) if self.args.json_out
                      else self.output_dir /
                           f"{self.case_id}_repair_decisions.json")
         report = {
-            "result":           json.loads(self.ptjsonlib.get_result_json()),
-            "decisions":        self._decisions,
+            "result":             json.loads(self.ptjsonlib.get_result_json()),
+            "decisions":          self._decisions,
             "repairSuccessRates": REPAIR_SUCCESS_RATES,
         }
         json_file.write_text(
             json.dumps(report, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
+        if self.args.json_out:
+            ptprint(self.ptjsonlib.get_result_json(), "", True)
         ptprint(f"JSON report: {json_file.name}", "OK", condition=self._out())
         ptprint(f"  {len(self._decisions)} repair decisions recorded.",
                 "INFO", condition=self._out())

@@ -13,20 +13,13 @@
 # LAST CHANGES:
 #   - IMAGE_EXTENSIONS, FORMAT_GROUP_MAP replaced with imports from _constants
 #   - Changed --json boolean flag to --json-out <file> for consistency
-#
-# NOTE (thesis design decision):
-#   This step merges outputs of Step 8a (filesystem recovery) and Step 8b
-#   (file carving) with deduplication by SHA-256. Filesystem-recovered files
-#   take priority over carved files of the same content because they retain
-#   original metadata (filename, path, timestamps). This step exists as a
-#   separate explicit stage to provide a clear Chain of Custody record of
-#   what entered the analysis pipeline, which is forensically important.
+#   - Removed _custom_sigint_handler + signal.signal(): handled in base.
+#   - Replaced inline add_properties({5 common fields}) with _init_properties().
 
 import argparse
 import hashlib
 import json
 import shutil
-import signal
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -38,13 +31,6 @@ from ._constants import IMAGE_EXTENSIONS, FORMAT_GROUP_MAP
 from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
-
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
 
 SCRIPTNAME         = "ptrecoveryconsolidation"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
@@ -66,29 +52,20 @@ class PtRecoveryConsolidation(ForensicToolBase):
         self.output_dir = Path(args.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Input directories (from previous steps)
         self.fs_recovery_dir = self.output_dir / f"{self.case_id}_recovered"
         self.carved_dir      = self.output_dir / f"{self.case_id}_carved" / "valid"
-
-        # Output directory
         self.consolidated_dir = self.output_dir / f"{self.case_id}_consolidated"
 
         self._s: Dict[str, Any] = {
-            "from_fs":        0,
-            "from_carving":   0,
-            "deduplicated":   0,
-            "total":          0,
-            "by_format":      defaultdict(int),
+            "from_fs":      0,
+            "from_carving": 0,
+            "deduplicated": 0,
+            "total":        0,
+            "by_format":    defaultdict(int),
         }
         self._consolidated_files: List[Dict] = []
 
-        self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
-            "analyst":       self.analyst,
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "dryRun":        self.dry_run,
-        })
+        self._init_properties(__version__)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -106,10 +83,6 @@ class PtRecoveryConsolidation(ForensicToolBase):
             return None
 
     def _collect_dir(self, base: Path, label: str) -> List[Dict]:
-        """
-        Recursively collect image files from a directory.
-        Returns list of {'path': Path, 'sha256': str, 'source': label} dicts.
-        """
         if not base.exists():
             ptprint(f"  Directory not found (skip): {base.name}",
                     "WARNING", condition=self._out())
@@ -170,7 +143,6 @@ class PtRecoveryConsolidation(ForensicToolBase):
                 if not self.dry_run:
                     dest_sub.mkdir(parents=True, exist_ok=True)
                     dest = dest_sub / fp.name
-                    # Avoid overwriting if filenames collide
                     if dest.exists():
                         dest = dest_sub / f"{fp.stem}_{sha[:8]}{fp.suffix}"
                     shutil.copy2(str(fp), str(dest))
@@ -179,10 +151,8 @@ class PtRecoveryConsolidation(ForensicToolBase):
 
                 self._s["total"] += 1
                 self._s["by_format"][group] += 1
-                if "fs" in source:
-                    self._s["from_fs"] += 1
-                else:
-                    self._s["from_carving"] += 1
+                if "fs" in source: self._s["from_fs"] += 1
+                else:              self._s["from_carving"] += 1
 
                 try:
                     st = fp.stat()
@@ -190,15 +160,14 @@ class PtRecoveryConsolidation(ForensicToolBase):
                     st = None
 
                 self._consolidated_files.append({
-                    "filename":    fp.name,
-                    "sha256":      sha,
-                    "source":      source,
-                    "group":       group,
-                    "sizeBytes":   st.st_size if st else None,
-                    "destPath":    str(dest.relative_to(self.consolidated_dir)),
+                    "filename":  fp.name,
+                    "sha256":    sha,
+                    "source":    source,
+                    "group":     group,
+                    "sizeBytes": st.st_size if st else None,
+                    "destPath":  str(dest.relative_to(self.consolidated_dir)),
                 })
 
-        # FS files first (priority), then carved
         _process(fs_files)
         _process(carved_files)
 
@@ -235,13 +204,13 @@ class PtRecoveryConsolidation(ForensicToolBase):
 
         s = self._s
         self.ptjsonlib.add_properties({
-            "compliance":         ["NIST SP 800-86", "ISO/IEC 27037:2012"],
-            "fromFilesystem":     s["from_fs"],
-            "fromCarving":        s["from_carving"],
-            "deduplicated":       s["deduplicated"],
-            "totalConsolidated":  s["total"],
-            "byFormat":           dict(s["by_format"]),
-            "consolidatedDir":    str(self.consolidated_dir),
+            "compliance":        ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+            "fromFilesystem":    s["from_fs"],
+            "fromCarving":       s["from_carving"],
+            "deduplicated":      s["deduplicated"],
+            "totalConsolidated": s["total"],
+            "byFormat":          dict(s["by_format"]),
+            "consolidatedDir":   str(self.consolidated_dir),
         })
         self.ptjsonlib.add_node(self.ptjsonlib.create_node_object(
             "chainOfCustodyEntry",
@@ -270,21 +239,19 @@ class PtRecoveryConsolidation(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        if self.args.json:
-            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-            return None
-
         json_file = (Path(self.args.json_out) if self.args.json_out
                      else self.output_dir /
                           f"{self.case_id}_consolidation_report.json")
         report = {
-            "result":             json.loads(self.ptjsonlib.get_result_json()),
-            "consolidatedFiles":  self._consolidated_files,
-            "consolidatedDir":    str(self.consolidated_dir),
+            "result":            json.loads(self.ptjsonlib.get_result_json()),
+            "consolidatedFiles": self._consolidated_files,
+            "consolidatedDir":   str(self.consolidated_dir),
         }
         json_file.write_text(
             json.dumps(report, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
+        if self.args.json_out:
+            ptprint(self.ptjsonlib.get_result_json(), "", True)
         ptprint(f"JSON report: {json_file.name}", "OK", condition=self._out())
         return str(json_file)
 

@@ -9,58 +9,102 @@
     the Free Software Foundation, either version 3 of the License.
     See <https://www.gnu.org/licenses/> for details.
 """
+
+# LAST CHANGES:
+#   - Moved SIGINT handler here from every individual script.
+#     signal.signal() at module level runs once on first import and covers
+#     all 13 scripts that import this base – no per-script duplication needed.
+#   - Added _init_properties(version) method: registers the five common
+#     forensic metadata fields (caseId, analyst, timestamp, scriptVersion,
+#     dryRun) on self.ptjsonlib. Replaces the identical add_properties()
+#     block that was copy-pasted into every __init__.
+
 import re
+import signal
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
- 
+
 from ptlibs.ptprinthelper import ptprint
- 
- 
+
+
+def _forensic_sigint_handler(sig, frame):
+    raise KeyboardInterrupt
+
+
+signal.signal(signal.SIGINT, _forensic_sigint_handler)
+
+
 class ForensicToolBase:
     """
     Mixin providing shared helpers for all Group 2 forensic tools.
- 
+
     Subclasses must expose:
         self.args        – parsed argparse.Namespace
         self.dry_run     – bool
         self.ptjsonlib   – PtJsonLib instance
+        self.case_id     – str
+        self.analyst     – str
     """
- 
+
     # ------------------------------------------------------------------
     # Output gate
     # ------------------------------------------------------------------
- 
+
     def _out(self) -> bool:
         """Return True when terminal output should be shown."""
         return not (self.args.json or getattr(self.args, "quiet", False))
- 
+
     # ------------------------------------------------------------------
     # JSON node helpers
     # ------------------------------------------------------------------
- 
+
     def _add_node(self, node_type: str, success: bool, **kwargs) -> None:
         self.ptjsonlib.add_node(self.ptjsonlib.create_node_object(
             node_type, properties={"success": success, **kwargs}
         ))
- 
+
     def _fail(self, node_type: str, msg: str) -> bool:
         """Log an error, record a failure node, and return False."""
         ptprint(msg, "ERROR", condition=self._out())
         self._add_node(node_type, False, error=msg)
         return False
- 
+
+    # ------------------------------------------------------------------
+    # Common metadata registration
+    # ------------------------------------------------------------------
+
+    def _init_properties(self, version: str) -> None:
+        """
+        Register the five common forensic metadata fields on self.ptjsonlib.
+
+        Call this from __init__ after setting self.case_id, self.analyst,
+        self.dry_run, and self.ptjsonlib.  Tool-specific extra fields
+        (e.g. imagePath, devicePath) are added by the caller afterward:
+
+            self._init_properties(__version__)
+            self.ptjsonlib.add_properties({"imagePath": str(self.image_path)})
+        """
+        self.ptjsonlib.add_properties({
+            "caseId":        self.case_id,
+            "analyst":       self.analyst,
+            "timestamp":     datetime.now(timezone.utc).isoformat(),
+            "scriptVersion": version,
+            "dryRun":        self.dry_run,
+        })
+
     # ------------------------------------------------------------------
     # Write-blocker confirmation  (Steps 3 and 5)
     # ------------------------------------------------------------------
- 
+
     @staticmethod
     def confirm_write_blocker() -> bool:
         """
         Interactive write-blocker confirmation required before any device
         access. Displays a checklist and waits for analyst confirmation.
         Returns True if confirmed, False if declined.
- 
+
         Defined once here to avoid duplication between ptmediareadability
         and ptforensicimaging.
         """
@@ -75,13 +119,13 @@ class ForensicToolBase:
             "  4. Target storage has sufficient free space",
         ]:
             ptprint(line, "TEXT", condition=True)
- 
+
         while True:
             resp = input("\nConfirm write-blocker is active [y/N]: ").strip().lower()
             if resp in ("y", "yes"):    ok = True;  break
             if resp in ("n", "no", ""): ok = False; break
             ptprint("Please enter 'y' or 'n'.", "WARNING", condition=True)
- 
+
         sym = "✓" * 70 if ok else "✗" * 70
         lv  = "OK" if ok else "ERROR"
         ptprint("\n" + sym, lv, condition=True)
@@ -89,34 +133,34 @@ class ForensicToolBase:
                 lv, condition=True, colortext=True)
         ptprint(sym, lv, condition=True)
         return ok
- 
+
     # ------------------------------------------------------------------
     # Shared image file validation  (Steps 8a, 8b, 10)
     # ------------------------------------------------------------------
- 
+
     def _validate_image_file(self, filepath: Path) -> Tuple[str, Dict]:
         """
         Two-stage image validation shared by filesystem recovery, file
         carving, and integrity validation (basic path only).
- 
+
         Stage 1 – minimum size and file(1) type recognition.
         Stage 2 – ImageMagick identify for structural integrity.
- 
+
         Returns (status, info_dict) where status is one of:
             'valid'     – passes both stages
             'corrupted' – fails stage 2 but is large enough to be a real file
             'invalid'   – too small, empty, or not recognised as an image
         """
         info: Dict = {"size": 0, "imageFormat": None, "dimensions": None}
- 
+
         try:
             info["size"] = filepath.stat().st_size
         except Exception as exc:
             return "invalid", {**info, "error": str(exc)}
- 
+
         if info["size"] < 100:
             return "invalid", info
- 
+
         # Stage 1 – file(1) type check
         r = self._run_command(["file", "-b", str(filepath)], timeout=10)
         if r["success"] and not any(
@@ -124,7 +168,7 @@ class ForensicToolBase:
                 for kw in ("image", "jpeg", "png", "tiff", "gif", "bitmap",
                            "raw", "canon", "nikon", "exif", "riff webp", "heic")):
             return "invalid", info
- 
+
         # Stage 2 – ImageMagick structural check
         r = self._run_command(["identify", str(filepath)], timeout=30)
         if r["success"]:
@@ -133,13 +177,13 @@ class ForensicToolBase:
                 info["imageFormat"] = m.group(1)
                 info["dimensions"]  = f"{m.group(2)}x{m.group(3)}"
             return "valid", info
- 
+
         return ("corrupted" if info["size"] > 1024 else "invalid"), info
- 
+
     # ------------------------------------------------------------------
     # Command execution
     # ------------------------------------------------------------------
- 
+
     def _check_command(self, cmd: str) -> bool:
         """Return True if cmd is available on PATH."""
         try:
@@ -147,12 +191,12 @@ class ForensicToolBase:
             return True
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
             return False
- 
+
     def _run_command(self, cmd: List[str], timeout: int = 300,
                      binary: bool = False) -> Dict[str, Any]:
         """
         Run a subprocess and return a uniform result dict.
- 
+
         Keys: success (bool), stdout (str or bytes), stderr (str), returncode (int).
         In dry-run mode returns success=True with empty output immediately.
         """

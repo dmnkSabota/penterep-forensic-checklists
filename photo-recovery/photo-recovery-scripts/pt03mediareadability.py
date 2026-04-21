@@ -15,11 +15,14 @@
 #   - Fixed save_report(): was printing JSON to stdout instead of saving to file;
 #     now correctly writes to --json-out path and prints raw JSON to stdout
 #     only when in json mode (platform integration behaviour)
+#   - Removed _custom_sigint_handler + signal.signal(): handled once at
+#     module level in ptforensictoolbase.
+#   - Replaced inline ptjsonlib.add_properties({5 common fields}) in __init__
+#     with self._init_properties(__version__); devicePath added separately.
 
 import argparse
 import json
 import os
-import signal
 import sys
 import time
 from datetime import datetime, timezone
@@ -30,13 +33,6 @@ from ._version import __version__
 from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
-
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
 
 SCRIPTNAME = "ptmediareadability"
 
@@ -73,14 +69,8 @@ class PtMediaReadability(ForensicToolBase):
             if not os.path.exists(self.device):
                 self._abort(f"Device not found: {self.device}")
 
-        self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
-            "analyst":       self.analyst,
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "devicePath":    self.device,
-            "dryRun":        self.dry_run,
-        })
+        self._init_properties(__version__)
+        self.ptjsonlib.add_properties({"devicePath": self.device})
 
     # ------------------------------------------------------------------
     # Helpers
@@ -101,10 +91,6 @@ class PtMediaReadability(ForensicToolBase):
             if r["success"] and r["stdout"].isdigit():
                 return int(r["stdout"])
         return 0
-
-    # NOTE: confirm_write_blocker() is inherited from ForensicToolBase.
-    # It was removed from here to eliminate the duplicate that existed
-    # between this class and PtForensicImaging.
 
     # ------------------------------------------------------------------
     # Phase 0 – pre-detection
@@ -140,7 +126,7 @@ class PtMediaReadability(ForensicToolBase):
         self.detection_results["lsblk"] = {
             "visible": True, "output": lsblk_out, "sizeBytes": size}
 
-        # blkid – filesystem and encryption
+        # blkid
         ptprint("\n[0b] blkid – filesystem & encryption",
                 "SUBTITLE", condition=self._out())
         if self._check_command("blkid"):
@@ -166,7 +152,7 @@ class PtMediaReadability(ForensicToolBase):
             ptprint("⚠ blkid not available", "WARNING", condition=self._out())
             self.detection_results["blkid"] = {"error": "command not found"}
 
-        # smartctl – SMART health
+        # smartctl
         ptprint("\n[0c] smartctl – SMART health", "SUBTITLE", condition=self._out())
         if self._check_command("smartctl"):
             r     = self._run_command(["smartctl", "-a", self.device])
@@ -200,7 +186,7 @@ class PtMediaReadability(ForensicToolBase):
             ptprint("⚠ smartctl not available", "WARNING", condition=self._out())
             self.detection_results["smartctl"] = {"error": "command not found"}
 
-        # hdparm – TRIM
+        # hdparm
         ptprint("\n[0d] hdparm – TRIM detection", "SUBTITLE", condition=self._out())
         if self._check_command("hdparm"):
             r    = self._run_command(["hdparm", "-I", self.device])
@@ -224,7 +210,7 @@ class PtMediaReadability(ForensicToolBase):
             ptprint("⚠ hdparm not available", "WARNING", condition=self._out())
             self.detection_results["hdparm"] = {"error": "command not found"}
 
-        # mdadm – RAID membership
+        # mdadm
         ptprint("\n[0e] mdadm – RAID configuration", "SUBTITLE", condition=self._out())
         if self._check_command("mdadm"):
             r       = self._run_command(["mdadm", "--examine", self.device])
@@ -270,7 +256,7 @@ class PtMediaReadability(ForensicToolBase):
             self.stats["testsRun"] += 1
             return ok
 
-        # Test 1 – first sector (512 B)
+        # Test 1 – first sector
         ptprint("\nTest 1/4: First Sector (512 B)", "SUBTITLE", condition=self._out())
         r = self._run_command(
             ["dd", f"if={self.device}", "of=/dev/null",
@@ -323,7 +309,7 @@ class PtMediaReadability(ForensicToolBase):
             "totalReads":      len(results),
         })
 
-        # Test 4 – read speed (10 MB); skipped if sequential failed
+        # Test 4 – read speed
         if seq or self.dry_run:
             ptprint("\nTest 4/4: Read Speed (10 MB)", "SUBTITLE", condition=self._out())
             t0  = time.time()
@@ -457,10 +443,6 @@ class PtMediaReadability(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        # FIX: original code had args.json = bool(args.json_out) which caused
-        # the JSON to be printed to stdout but never saved to the file.
-        # Now: save to file when --json-out is provided; also print raw JSON
-        # to stdout in that mode for platform integration.
         if not self.args.json_out:
             return None
 
@@ -469,8 +451,6 @@ class PtMediaReadability(ForensicToolBase):
             json.dumps({"result": json.loads(self.ptjsonlib.get_result_json())},
                        indent=2, ensure_ascii=False),
             encoding="utf-8")
-        # Print raw JSON to stdout for platform integration (args.json is True
-        # when json_out is provided – used by _out() to suppress human output)
         ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
         ptprint(f"✓ JSON saved: {out}", "OK", condition=not self.args.json)
         return str(out)
@@ -529,8 +509,7 @@ def parse_args() -> argparse.Namespace:
         ptprinthelper.help_print(get_help(), SCRIPTNAME, __version__)
         sys.exit(0)
 
-    args = p.parse_args()
-    # args.json drives _out() → True suppresses human-readable terminal output
+    args      = p.parse_args()
     args.json = bool(args.json_out)
     if args.json:
         args.quiet = True
@@ -543,7 +522,6 @@ def main() -> int:
         args = parse_args()
 
         if not args.dry_run:
-            # confirm_write_blocker is now defined in ForensicToolBase
             if not PtMediaReadability.confirm_write_blocker():
                 ptprint("\nTest ABORTED – write-blocker is REQUIRED!",
                         "ERROR", condition=True, colortext=True)

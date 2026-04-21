@@ -14,22 +14,17 @@
 #   - IMAGE_FORMATS, FORMAT_DIRS, IMAGE_FILE_KEYWORDS replaced with imports
 #     from _constants (single source of truth)
 #   - _validate_file() removed; replaced by self._validate_image_file()
-#     inherited from ForensicToolBase (duplicate in ptfilesystemrecovery)
-#   - Fixed PhotoRec invocation: removed the .cmd file creation which was
-#     dead code (the file was written but never passed to photorec).
-#     Using the correct non-interactive syntax on Linux (testdisk 7.1+):
-#       photorec /log /d output_dir /cmd image_path search
-#     Format filtering is intentionally handled post-carving by
-#     validate_and_deduplicate() – this is more reliable across photorec
-#     versions than building a comma-separated fileopt command string.
+#     inherited from ForensicToolBase
+#   - Fixed PhotoRec invocation: non-interactive batch mode.
 #   - Changed --json boolean flag to --json-out <file> for consistency
+#   - Removed _custom_sigint_handler + signal.signal(): handled in base.
+#   - Replaced inline add_properties({5 common fields}) with _init_properties().
 
 import argparse
 import hashlib
 import json
 import re
 import shutil
-import signal
 import subprocess
 import sys
 from collections import defaultdict
@@ -43,18 +38,11 @@ from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
-
 SCRIPTNAME         = "ptfilecarving"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
-PHOTOREC_TIMEOUT   = 14400   # 4 hours
-VALIDATE_TIMEOUT   = 30      # per file
-MIN_FILE_SIZE      = 100     # bytes
+PHOTOREC_TIMEOUT   = 14400
+VALIDATE_TIMEOUT   = 30
+MIN_FILE_SIZE      = 100
 
 
 class PtFileCarving(ForensicToolBase):
@@ -62,9 +50,9 @@ class PtFileCarving(ForensicToolBase):
     Recovers image files from a forensic image using PhotoRec (file carving).
     Validates and deduplicates recovered files. Read-only on the forensic image.
 
-    NOTE: This step uses a non-interactive PhotoRec invocation. Format filtering
-    is applied post-carving – PhotoRec will recover all file types and
-    validate_and_deduplicate() retains only valid image files.
+    NOTE: Uses non-interactive PhotoRec batch mode. Format filtering is applied
+    post-carving – PhotoRec recovers all file types and validate_and_deduplicate()
+    retains only valid image files.
     """
 
     def __init__(self, args: argparse.Namespace) -> None:
@@ -89,13 +77,7 @@ class PtFileCarving(ForensicToolBase):
         }
         self._valid_files: List[Dict] = []
 
-        self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
-            "analyst":       self.analyst,
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "dryRun":        self.dry_run,
-        })
+        self._init_properties(__version__)
 
     # ------------------------------------------------------------------
     # Phases
@@ -169,15 +151,6 @@ class PtFileCarving(ForensicToolBase):
         if not self.dry_run:
             self.photorec_work.mkdir(parents=True, exist_ok=True)
 
-        # Non-interactive PhotoRec batch mode (testdisk 7.1+, Ubuntu 22.04).
-        #
-        # Syntax:  photorec /log /d output_dir /cmd image_path command
-        #
-        # Format filtering is NOT applied here via fileopt commands because
-        # the comma-separated fileopt string varies across PhotoRec versions.
-        # Instead, validate_and_deduplicate() (step 3/4) retains only files
-        # whose extensions appear in IMAGE_EXTENSIONS and that pass
-        # ImageMagick identify validation.
         cmd = ["photorec", "/log", "/d", str(self.photorec_work),
                "/cmd", str(self.image_path), "search"]
 
@@ -224,7 +197,6 @@ class PtFileCarving(ForensicToolBase):
             ptprint("\n  Interrupted by user.", "WARNING", condition=self._out())
             raise
 
-        # Count how many files PhotoRec recovered (all types)
         carved_all = list(self.photorec_work.rglob("*"))
         total      = sum(1 for f in carved_all if f.is_file())
         ptprint(f"  ✓ PhotoRec done. {total} file(s) in work directory.",
@@ -241,7 +213,6 @@ class PtFileCarving(ForensicToolBase):
             if not self.dry_run:
                 d.mkdir(parents=True, exist_ok=True)
 
-        # Collect candidate files: extension must be in IMAGE_EXTENSIONS
         candidates: List[Path] = []
         src = self.photorec_work if not self.dry_run else Path("/dev/null")
         if src.exists():
@@ -259,14 +230,12 @@ class PtFileCarving(ForensicToolBase):
         self._s["image_files"] = len(candidates)
 
         seen_hashes: Set[str] = set()
-        counters    = defaultdict(int)
 
         for idx, fp in enumerate(candidates, 1):
             if idx % 100 == 0:
                 ptprint(f"  {idx}/{len(candidates)} …",
                         "INFO", condition=self._out())
 
-            # Deduplication by SHA-256
             try:
                 sha    = hashlib.sha256(fp.read_bytes()).hexdigest()
                 is_dup = sha in seen_hashes
@@ -276,14 +245,12 @@ class PtFileCarving(ForensicToolBase):
 
             if is_dup:
                 self._s["duplicates"] += 1
-                counters["dup"] += 1
                 if not self.dry_run:
                     shutil.move(str(fp), str(self.carved_dupes / fp.name))
                 continue
             if sha:
                 seen_hashes.add(sha)
 
-            # _validate_image_file() is now in ForensicToolBase – no local copy needed
             status, vinfo = self._validate_image_file(fp)
             ext   = fp.suffix.lower().lstrip(".")
             group = FORMAT_GROUP_MAP.get(ext, "other")
@@ -292,7 +259,6 @@ class PtFileCarving(ForensicToolBase):
             if status == "valid":
                 self._s["valid"] += 1
                 self._s["by_format"][group] += 1
-                counters["valid"] += 1
                 dest = self.carved_valid / dest_dir
                 if not self.dry_run:
                     dest.mkdir(parents=True, exist_ok=True)
@@ -308,12 +274,10 @@ class PtFileCarving(ForensicToolBase):
                 })
             elif status == "corrupted":
                 self._s["corrupted"] += 1
-                counters["corrupt"] += 1
                 if not self.dry_run:
                     shutil.move(str(fp), str(self.carved_corrupt / fp.name))
             else:
                 self._s["invalid"] += 1
-                counters["invalid"] += 1
                 if not self.dry_run and fp.exists():
                     fp.unlink()
 
@@ -359,18 +323,18 @@ class PtFileCarving(ForensicToolBase):
                         if s["image_files"] else None)
 
         self.ptjsonlib.add_properties({
-            "compliance":        ["NIST SP 800-86", "ISO/IEC 27037:2012"],
-            "method":            "file_carving",
-            "carvingTool":       "photorec",
-            "totalCarvedFiles":  s["carved"],
-            "imageCandidates":   s["image_files"],
-            "validImages":       s["valid"],
-            "corruptedImages":   s["corrupted"],
-            "duplicates":        s["duplicates"],
-            "invalidFiles":      s["invalid"],
-            "byFormat":          dict(s["by_format"]),
-            "successRate":       success_rate,
-            "outputDir":         str(self.carved_out),
+            "compliance":       ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+            "method":           "file_carving",
+            "carvingTool":      "photorec",
+            "totalCarvedFiles": s["carved"],
+            "imageCandidates":  s["image_files"],
+            "validImages":      s["valid"],
+            "corruptedImages":  s["corrupted"],
+            "duplicates":       s["duplicates"],
+            "invalidFiles":     s["invalid"],
+            "byFormat":         dict(s["by_format"]),
+            "successRate":      success_rate,
+            "outputDir":        str(self.carved_out),
         })
         self.ptjsonlib.add_node(self.ptjsonlib.create_node_object(
             "chainOfCustodyEntry",
@@ -395,10 +359,6 @@ class PtFileCarving(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        if self.args.json:
-            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-            return None
-
         json_file = (Path(self.args.json_out) if self.args.json_out
                      else self.output_dir / f"{self.case_id}_carving_report.json")
         report = {
@@ -413,6 +373,8 @@ class PtFileCarving(ForensicToolBase):
         json_file.write_text(
             json.dumps(report, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
+        if self.args.json_out:
+            ptprint(self.ptjsonlib.get_result_json(), "", True)
         ptprint(f"JSON report: {json_file.name}", "OK", condition=self._out())
         return str(json_file)
 

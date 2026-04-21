@@ -11,13 +11,18 @@
 """
 
 # LAST CHANGES:
-#   - IMAGE_EXTENSIONS and FORMAT_GROUPS replaced with imports from _constants
-#   - Fixed save_report() JSON-to-stdout bug (consistent with other tools)
+#   - Fixed save_report(): when --json-out was provided (args.json=True),
+#     the original code only printed to stdout and never saved to the file.
+#     Now: always saves (to json_out path or default), additionally prints
+#     in JSON mode. Pattern consistent with ptmediareadability.
+#   - Removed _custom_sigint_handler + signal.signal(): handled in base.
+#   - Replaced inline add_properties({5 common fields}) with
+#     self._init_properties(__version__); imagePath added separately.
+#   - IMAGE_EXTENSIONS and FORMAT_GROUPS replaced with imports from _constants.
 
 import argparse
 import json
 import re
-import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,13 +33,6 @@ from ._constants import IMAGE_EXTENSIONS, FORMAT_GROUP_MAP
 from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
-
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
 
 SCRIPTNAME         = "ptfilesystemanalysis"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
@@ -50,7 +48,6 @@ FS_TYPE_MAP: Dict[str, str] = {
     "ISO 9660": "ISO9660",
 }
 
-# (filesystem_recognized, directory_readable) → (method, tool, est_minutes, notes)
 RECOVERY_STRATEGIES: Dict[Tuple[bool, bool], Tuple[str, str, int, List[str]]] = {
     (True, True): (
         "filesystem_scan", "fls + icat (The Sleuth Kit)", 15,
@@ -98,14 +95,8 @@ class PtFilesystemAnalysis(ForensicToolBase):
         self.directory_readable:    bool           = False
         self.total_images:          int            = 0
 
-        self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
-            "analyst":       self.analyst,
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "imagePath":     str(self.image_path),
-            "dryRun":        self.dry_run,
-        })
+        self._init_properties(__version__)
+        self.ptjsonlib.add_properties({"imagePath": str(self.image_path)})
 
     # ------------------------------------------------------------------
     # Phases
@@ -273,7 +264,6 @@ class PtFilesystemAnalysis(ForensicToolBase):
         return True, active, deleted, file_list
 
     def identify_image_files(self, file_list: List[Dict]) -> Dict[str, Any]:
-        # Uses IMAGE_EXTENSIONS and FORMAT_GROUP_MAP from _constants
         counts: Dict[str, Any] = {
             "total": 0, "active": 0, "deleted": 0,
             "byFormat": {g: {"active": 0, "deleted": 0}
@@ -407,16 +397,15 @@ class PtFilesystemAnalysis(ForensicToolBase):
         next_step = {
             "filesystem_scan": "Filesystem Recovery",
             "file_carving":    "File Carving",
-        }.get(method, "Hybrid Recovery")
+        }.get(method, "Hybrid Recovery (Filesystem Recovery + File Carving)")
         ptprint(f"Next: {next_step}", "INFO", condition=self._out())
         ptprint("=" * 70, "TITLE", condition=self._out())
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        if self.args.json:
-            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-            return None
-
+        # FIX: original branched on args.json and in that branch only printed,
+        # never saved. Now: always saves to json_out or default path, and
+        # additionally prints raw JSON in JSON mode.
         json_file = (Path(self.args.json_out) if self.args.json_out
                      else self.output_dir /
                           f"{self.case_id}_filesystem_analysis.json")
@@ -427,6 +416,10 @@ class PtFilesystemAnalysis(ForensicToolBase):
         json_file.write_text(
             json.dumps(report, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
+
+        if self.args.json:
+            ptprint(self.ptjsonlib.get_result_json(), "", True)
+
         ptprint(f"JSON report: {json_file.name}", "OK", condition=self._out())
         return str(json_file)
 

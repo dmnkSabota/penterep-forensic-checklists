@@ -11,9 +11,16 @@
 """
 
 # LAST CHANGES:
+#   - Fixed repair_all_files(): duplicate line
+#       self._s[method] = self._s["by_method"].get(method, 0) + 1
+#     wrote to the wrong key in self._s (method name as top-level key instead
+#     of inside by_method). The line is now removed; only the correct
+#       self._s["by_method"][method] = ...
+#     remains.
+#   - Removed _custom_sigint_handler + signal.signal(): handled in base.
+#   - Replaced inline add_properties({5 common fields}) with
+#     self._init_properties(__version__).
 #   - Added repair_png_resave() for PNG files: PIL open + verify + save.
-#     This handles minor PNG corruption (damaged trailing chunks) where
-#     the image data itself is intact but the file structure has errors.
 #   - Updated repair_all_files() with extension-based dispatch so PNG files
 #     are sent to repair_png_resave() instead of JPEG repair functions.
 #   - Added explicit note in docstring: byte-level repair is JPEG-only.
@@ -30,7 +37,6 @@
 import argparse
 import json
 import shutil
-import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,24 +47,17 @@ from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
-
 SCRIPTNAME         = "ptphotorepair"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
 
 # JPEG structural constants
-JPEG_SOI = b"\xff\xd8"   # Start of Image
-JPEG_EOI = b"\xff\xd9"   # End of Image
-JPEG_APP0 = b"\xff\xe0"  # APP0 (JFIF)
-JPEG_APP1 = b"\xff\xe1"  # APP1 (EXIF)
-JPEG_SOS  = b"\xff\xda"  # Start of Scan
-JPEG_DQT  = b"\xff\xdb"  # Quantisation Table
-JPEG_SOF  = b"\xff\xc0"  # Start of Frame (baseline)
+JPEG_SOI = b"\xff\xd8"
+JPEG_EOI = b"\xff\xd9"
+JPEG_APP0 = b"\xff\xe0"
+JPEG_APP1 = b"\xff\xe1"
+JPEG_SOS  = b"\xff\xda"
+JPEG_DQT  = b"\xff\xdb"
+JPEG_SOF  = b"\xff\xc0"
 
 try:
     from PIL import Image, ImageFile
@@ -67,17 +66,15 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
-# Corruption type → repair method name
-# JPEG methods only (see file-level dispatch in repair_all_files)
 _STRATEGY_MAP: Dict[str, str] = {
     "missing_footer":   "repair_missing_footer",
     "invalid_header":   "repair_invalid_header",
     "corrupt_segments": "repair_invalid_segments",
-    "corrupt_segment":  "repair_invalid_segments",   # alias
-    "invalid_segment":  "repair_invalid_segments",   # alias
+    "corrupt_segment":  "repair_invalid_segments",
+    "invalid_segment":  "repair_invalid_segments",
     "corrupt_data":     "repair_truncated_file",
     "truncated":        "repair_truncated_file",
-    "unknown":          "repair_invalid_header",     # conservative fallback
+    "unknown":          "repair_invalid_header",
 }
 
 
@@ -104,8 +101,8 @@ class PtPhotoRepair(ForensicToolBase):
         self.output_dir = Path(args.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.repaired_dir   = self.output_dir / f"{self.case_id}_repaired"
-        self.failed_dir     = self.output_dir / f"{self.case_id}_repair_failed"
+        self.repaired_dir = self.output_dir / f"{self.case_id}_repaired"
+        self.failed_dir   = self.output_dir / f"{self.case_id}_repair_failed"
 
         self._s: Dict = {
             "total": 0, "repaired": 0, "failed": 0, "skipped": 0,
@@ -113,13 +110,7 @@ class PtPhotoRepair(ForensicToolBase):
         }
         self._repair_results: List[Dict] = []
 
-        self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
-            "analyst":       self.analyst,
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "dryRun":        self.dry_run,
-        })
+        self._init_properties(__version__)
 
     # ------------------------------------------------------------------
     # JPEG byte-level repair methods
@@ -160,7 +151,6 @@ class PtPhotoRepair(ForensicToolBase):
             else:
                 image_data = data[sos_pos:]
 
-            # Minimal JFIF APP0 header (18 bytes)
             app0 = (b"\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
             rebuilt = JPEG_SOI + app0 + image_data
             if not rebuilt.endswith(JPEG_EOI):
@@ -168,7 +158,6 @@ class PtPhotoRepair(ForensicToolBase):
 
             path.write_bytes(rebuilt)
 
-            # Verify with PIL if available
             if PIL_AVAILABLE:
                 try:
                     img = Image.open(str(path))
@@ -185,13 +174,11 @@ class PtPhotoRepair(ForensicToolBase):
     def repair_invalid_segments(self, path: Path) -> Tuple[bool, str]:
         """
         Strip unknown or damaged segments, keeping recognised marker types.
-        This is a conservative approach: only segments with valid length fields
-        and known marker IDs (FF D8 through FF FE) are retained.
         """
         if self.dry_run:
             return True, "[DRY-RUN] segment stripping simulated"
         try:
-            data      = path.read_bytes()
+            data = path.read_bytes()
             if not data.startswith(JPEG_SOI):
                 return False, "Not a valid JPEG (missing SOI)"
 
@@ -205,15 +192,12 @@ class PtPhotoRepair(ForensicToolBase):
                 marker = data[pos:pos + 2]
                 if len(marker) < 2:
                     break
-                # SOS: the rest is entropy-coded data
                 if marker == JPEG_SOS:
                     kept_segments.append(data[pos:])
                     break
-                # EOI: done
                 if marker == JPEG_EOI:
                     kept_segments.append(JPEG_EOI)
                     break
-                # Segments with length field
                 if pos + 4 <= len(data):
                     seg_len = int.from_bytes(data[pos + 2:pos + 4], "big")
                     if 2 <= seg_len <= len(data) - pos - 2:
@@ -250,7 +234,6 @@ class PtPhotoRepair(ForensicToolBase):
         if self.dry_run:
             return True, "[DRY-RUN] truncated repair simulated"
         if not PIL_AVAILABLE:
-            # Fallback: just append EOI so most viewers can open the partial file
             return self.repair_missing_footer(path)
         tmp = path.with_name(path.stem + "_trunc_tmp.jpg")
         try:
@@ -281,11 +264,6 @@ class PtPhotoRepair(ForensicToolBase):
 
         Limitation: this does not repair damaged IDAT chunks or a corrupt
         header; those cases result in a PIL exception and return False.
-
-        NOTE: This is intentionally a simple approach. For thesis purposes
-        it covers the most common PNG corruption scenario after file carving
-        (partial trailing data). For severe corruption, the file should be
-        classified as MANUAL_REVIEW by ptrepairdecision.
         """
         if not PIL_AVAILABLE:
             return False, "PIL/Pillow not available (pip install pillow)"
@@ -318,10 +296,6 @@ class PtPhotoRepair(ForensicToolBase):
         """
         ext = src_path.suffix.lower()
 
-        # --- Extension-based dispatch ---
-        # JPEG: use _STRATEGY_MAP lookup
-        # PNG:  always use repair_png_resave (regardless of corruption_type)
-        # TIFF/other: not supported
         if ext in (".tif", ".tiff"):
             return (False, "not_supported",
                     "TIFF repair not implemented – "
@@ -336,7 +310,6 @@ class PtPhotoRepair(ForensicToolBase):
         else:
             method_name = _STRATEGY_MAP.get(corruption_type, "repair_invalid_header")
 
-        # Create working copy
         if not self.dry_run:
             dest = self.repaired_dir / src_path.name
             if dest.exists():
@@ -345,7 +318,6 @@ class PtPhotoRepair(ForensicToolBase):
         else:
             dest = self.repaired_dir / src_path.name
 
-        # Call the repair method
         method = getattr(self, method_name)
         success, msg = method(dest)
 
@@ -385,9 +357,9 @@ class PtPhotoRepair(ForensicToolBase):
             self.failed_dir.mkdir(parents=True, exist_ok=True)
 
         for idx, decision in enumerate(to_repair, 1):
-            path_s  = decision.get("path")
-            ctype   = decision.get("corruptionType", "unknown")
-            src     = Path(path_s) if path_s else None
+            path_s = decision.get("path")
+            ctype  = decision.get("corruptionType", "unknown")
+            src    = Path(path_s) if path_s else None
 
             if not src or (not src.exists() and not self.dry_run):
                 self._s["skipped"] += 1
@@ -402,7 +374,9 @@ class PtPhotoRepair(ForensicToolBase):
                     "INFO", condition=self._out())
 
             success, method, msg = self.repair_file(src, ctype)
-            self._s[method] = self._s["by_method"].get(method, 0) + 1
+
+            # FIX: removed duplicate line `self._s[method] = ...` which wrote
+            # to the wrong top-level key in self._s. Only by_method is updated.
             self._s["by_method"][method] = self._s["by_method"].get(method, 0) + 1
 
             if success:
@@ -412,8 +386,7 @@ class PtPhotoRepair(ForensicToolBase):
                 self._s["failed"] += 1
                 ptprint(f"    ✗ {method}: {msg}", "ERROR", condition=self._out())
                 if not self.dry_run and src.exists():
-                    shutil.copy2(str(src),
-                                 str(self.failed_dir / src.name))
+                    shutil.copy2(str(src), str(self.failed_dir / src.name))
 
             self._repair_results.append({
                 "filename":       src.name,
@@ -503,10 +476,6 @@ class PtPhotoRepair(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        if self.args.json:
-            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-            return None
-
         json_file = (Path(self.args.json_out) if self.args.json_out
                      else self.output_dir / f"{self.case_id}_repair_report.json")
         report = {
@@ -516,6 +485,8 @@ class PtPhotoRepair(ForensicToolBase):
         json_file.write_text(
             json.dumps(report, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
+        if self.args.json_out:
+            ptprint(self.ptjsonlib.get_result_json(), "", True)
         ptprint(f"JSON report: {json_file.name}", "OK", condition=self._out())
         return str(json_file)
 

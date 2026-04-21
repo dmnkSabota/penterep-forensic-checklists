@@ -11,22 +11,15 @@
 """
 
 # LAST CHANGES:
-#   - IMAGE_EXTENSIONS replaced with import from _constants
-#   - EDITING_SOFTWARE: trimmed from 15 to 8 most common entries.
-#     A 15-entry list requires a literature source to defend. Eight entries
-#     covering the most frequently documented software in forensic case
-#     literature is defensible and not over-fitted to a specific dataset.
-#     Reference: Casey, E. (2011). Digital Evidence and Computer Crime
-#     (3rd ed.), Elsevier – Chapter 14 (photo forensics).
-#   - Anomaly thresholds: added inline rationale and references for each.
-#     Thesis reviewers will question unexplained magic numbers.
-#   - Batch processing (50 files per exiftool call) retained – this is
-#     a correct and documented optimisation.
+#   - IMAGE_EXTENSIONS replaced with import from _constants.
+#   - EDITING_SOFTWARE: trimmed to 8 most common entries.
+#   - Anomaly thresholds: added inline rationale and references.
+#   - Removed _custom_sigint_handler + signal.signal(): handled in base.
+#   - Replaced inline add_properties({5 common fields}) with _init_properties().
 
 import argparse
 import json
 import re
-import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -39,26 +32,13 @@ from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
 
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
-
 SCRIPTNAME         = "ptexifanalysis"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
-EXIFTOOL_BATCH     = 50   # files per exiftool call
+EXIFTOOL_BATCH     = 50
 
 # ---------------------------------------------------------------------------
 # Editing software indicators
-#
-# Reduced to the 8 most commonly documented in forensic case literature.
-# Reference: Casey, E. (2011). Digital Evidence and Computer Crime (3rd ed.),
-# Elsevier, Ch. 14; Farid, H. (2016). Photo Forensics, MIT Press, Ch. 3.
-#
-# A comprehensive list of all known photo editing software would require
-# regular maintenance and is out of scope for this thesis.
+# Reference: Casey (2011), Ch. 14; Farid (2016), Ch. 3.
 # ---------------------------------------------------------------------------
 EDITING_SOFTWARE = frozenset({
     "photoshop",
@@ -72,32 +52,12 @@ EDITING_SOFTWARE = frozenset({
 })
 
 # ---------------------------------------------------------------------------
-# Anomaly detection thresholds with rationale
-#
-# These values represent practical investigation starting points, not
-# absolute forensic conclusions. Any detected anomaly should be investigated
-# by the analyst before drawing conclusions.
-#
-# References used for threshold selection:
-#   CIPA DC-008:2019 – Exchangeable Image File Format (EXIF), §4.6
-#   Farid, H. (2016). Photo Forensics. MIT Press, Ch. 2–4.
-#   NIST SP 800-86 §3.3 – time-related metadata considerations
+# Anomaly detection thresholds
+# References: CIPA DC-008:2019 §4.6; Farid (2016) Ch. 2–4; NIST SP 800-86 §3.3
 # ---------------------------------------------------------------------------
 ANOMALY_THRESHOLDS = {
-    # Any photo whose captured timestamp is in the future is definitively
-    # anomalous – the camera clock was either wrong or the metadata was modified.
-    "future_date": True,
-
-    # ISO 25600 is the upper sensitivity limit for most consumer cameras
-    # manufactured before 2020 (Canon, Nikon, Sony product manuals).
-    # Values above this limit warrant investigation but are possible on
-    # recent high-end mirrorless sensors (e.g., Sony A7S III supports ISO 409600).
-    # Threshold is intentionally conservative to avoid false negatives.
-    "unusual_iso_threshold": 25600,
-
-    # A ModifyDate (IFD0) later than DateTimeOriginal (ExifIFD) indicates
-    # the file was opened and re-saved after capture, which is relevant
-    # when assessing whether a file has been edited post-acquisition.
+    "future_date":               True,
+    "unusual_iso_threshold":     25600,
     "check_modify_after_original": True,
 }
 
@@ -114,12 +74,7 @@ FIELDS_TO_EXTRACT = [
 class PtExifAnalysis(ForensicToolBase):
     """
     Batch EXIF metadata extraction and forensic anomaly detection.
-
-    Uses exiftool with -json batch processing (EXIFTOOL_BATCH files per call)
-    for performance. Detects three categories of anomalies:
-      1. Future capture timestamp
-      2. Unusually high ISO (above consumer camera practical limits)
-      3. Modification timestamp later than original capture timestamp
+    Uses exiftool with EXIFTOOL_BATCH files per call for performance.
     """
 
     def __init__(self, args: argparse.Namespace) -> None:
@@ -131,10 +86,10 @@ class PtExifAnalysis(ForensicToolBase):
         self.output_dir = Path(args.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.source_dir   = (Path(args.source_dir)
-                             if getattr(args, "source_dir", None)
-                             else self.output_dir /
-                                  f"{self.case_id}_consolidated")
+        self.source_dir = (Path(args.source_dir)
+                           if getattr(args, "source_dir", None)
+                           else self.output_dir /
+                                f"{self.case_id}_consolidated")
 
         self._s: Dict[str, Any] = {
             "total": 0, "with_exif": 0, "no_exif": 0, "anomalies": 0,
@@ -142,27 +97,17 @@ class PtExifAnalysis(ForensicToolBase):
         }
         self._exif_records: List[Dict] = []
 
-        self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
-            "analyst":       self.analyst,
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "dryRun":        self.dry_run,
-        })
+        self._init_properties(__version__)
 
     # ------------------------------------------------------------------
     # EXIF extraction
     # ------------------------------------------------------------------
 
     def _run_exiftool_batch(self, files: List[Path]) -> List[Dict]:
-        """Run exiftool on a batch of files and return parsed JSON output."""
         if self.dry_run:
             return [{"SourceFile": str(f)} for f in files]
 
-        fields_args = []
-        for field in FIELDS_TO_EXTRACT:
-            fields_args += [f"-{field}"]
-
+        fields_args = [f"-{field}" for field in FIELDS_TO_EXTRACT]
         cmd = (["exiftool", "-json", "-charset", "utf8"] +
                fields_args +
                [str(f) for f in files])
@@ -181,7 +126,6 @@ class PtExifAnalysis(ForensicToolBase):
     # ------------------------------------------------------------------
 
     def _parse_datetime(self, raw: Optional[str]) -> Optional[datetime]:
-        """Parse EXIF datetime string (YYYY:MM:DD HH:MM:SS) to datetime."""
         if not raw:
             return None
         m = re.match(r"(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})",
@@ -194,7 +138,6 @@ class PtExifAnalysis(ForensicToolBase):
             return None
 
     def _detect_editing_software(self, exif: Dict) -> Optional[str]:
-        """Return detected editing software name, or None."""
         for field in ("Software", "Artist", "Copyright"):
             val = str(exif.get(field, "")).lower()
             for sw in EDITING_SOFTWARE:
@@ -203,14 +146,9 @@ class PtExifAnalysis(ForensicToolBase):
         return None
 
     def _detect_anomalies(self, exif: Dict) -> List[Dict]:
-        """
-        Apply anomaly detection rules. Returns list of anomaly dicts.
-        See ANOMALY_THRESHOLDS for rationale and references.
-        """
         anomalies: List[Dict] = []
         now = datetime.now(timezone.utc)
 
-        # Rule 1: future capture timestamp
         dt_orig = self._parse_datetime(exif.get("DateTimeOriginal"))
         if dt_orig and dt_orig > now:
             anomalies.append({
@@ -220,9 +158,8 @@ class PtExifAnalysis(ForensicToolBase):
                 "reference":   "NIST SP 800-86 §3.3; CIPA DC-008:2019 §4.6",
             })
 
-        # Rule 2: unusually high ISO (above consumer camera practical limits)
         try:
-            iso_val = int(str(exif.get("ISO", 0)).split()[0])
+            iso_val   = int(str(exif.get("ISO", 0)).split()[0])
             threshold = ANOMALY_THRESHOLDS["unusual_iso_threshold"]
             if iso_val > threshold:
                 anomalies.append({
@@ -235,7 +172,6 @@ class PtExifAnalysis(ForensicToolBase):
         except (ValueError, TypeError):
             pass
 
-        # Rule 3: file modified after original capture
         dt_modify = self._parse_datetime(exif.get("ModifyDate"))
         if (ANOMALY_THRESHOLDS["check_modify_after_original"]
                 and dt_orig and dt_modify and dt_modify > dt_orig):
@@ -251,9 +187,6 @@ class PtExifAnalysis(ForensicToolBase):
         return anomalies
 
     def _parse_single(self, exif: Dict) -> Dict:
-        """
-        Produce a normalised record for one file from the raw exiftool output.
-        """
         src      = exif.get("SourceFile", "")
         filename = Path(src).name if src else "unknown"
 
@@ -274,25 +207,25 @@ class PtExifAnalysis(ForensicToolBase):
         anomalies  = self._detect_anomalies(exif)
 
         return {
-            "filename":       filename,
-            "filePath":       src,
-            "hasExif":        has_key_exif,
-            "make":           exif.get("Make"),
-            "model":          exif.get("Model"),
-            "software":       exif.get("Software"),
+            "filename":        filename,
+            "filePath":        src,
+            "hasExif":         has_key_exif,
+            "make":            exif.get("Make"),
+            "model":           exif.get("Model"),
+            "software":        exif.get("Software"),
             "editingSoftware": editing_sw,
             "dateTimeOriginal": exif.get("DateTimeOriginal"),
-            "createDate":     exif.get("CreateDate"),
-            "modifyDate":     exif.get("ModifyDate"),
-            "iso":            exif.get("ISO"),
-            "fNumber":        exif.get("FNumber"),
-            "exposureTime":   exif.get("ExposureTime"),
-            "focalLength":    exif.get("FocalLength"),
-            "flash":          exif.get("Flash"),
-            "width":          exif.get("ImageWidth"),
-            "height":         exif.get("ImageHeight"),
-            "gps":            gps,
-            "anomalies":      anomalies,
+            "createDate":      exif.get("CreateDate"),
+            "modifyDate":      exif.get("ModifyDate"),
+            "iso":             exif.get("ISO"),
+            "fNumber":         exif.get("FNumber"),
+            "exposureTime":    exif.get("ExposureTime"),
+            "focalLength":     exif.get("FocalLength"),
+            "flash":           exif.get("Flash"),
+            "width":           exif.get("ImageWidth"),
+            "height":          exif.get("ImageHeight"),
+            "gps":             gps,
+            "anomalies":       anomalies,
         }
 
     # ------------------------------------------------------------------
@@ -332,7 +265,6 @@ class PtExifAnalysis(ForensicToolBase):
             self._add_node("exifAnalysis", True, totalFiles=0)
             return True
 
-        # Batch processing: EXIFTOOL_BATCH files per exiftool call
         for start in range(0, len(candidates), EXIFTOOL_BATCH):
             batch = candidates[start:start + EXIFTOOL_BATCH]
             pct   = min(start + EXIFTOOL_BATCH, len(candidates))
@@ -441,10 +373,6 @@ class PtExifAnalysis(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        if self.args.json:
-            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-            return None
-
         json_file = (Path(self.args.json_out) if self.args.json_out
                      else self.output_dir /
                           f"{self.case_id}_exif_analysis.json")
@@ -455,6 +383,8 @@ class PtExifAnalysis(ForensicToolBase):
         json_file.write_text(
             json.dumps(report, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8")
+        if self.args.json_out:
+            ptprint(self.ptjsonlib.get_result_json(), "", True)
         ptprint(f"JSON report: {json_file.name}", "OK", condition=self._out())
         ptprint(f"  {len(self._exif_records)} EXIF records saved.",
                 "INFO", condition=self._out())

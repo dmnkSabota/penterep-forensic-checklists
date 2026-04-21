@@ -12,17 +12,16 @@
 
 # LAST CHANGES:
 #   - Removed confirm_write_blocker() – now inherited from ForensicToolBase
-#   - Replaced threading-based progress bar (Thread + Event + _drain) with
-#     simple poll-based loop: check file size every second while process runs.
-#     This eliminates a potential deadlock if stdout buffer fills and is easier
-#     to debug during testing.
+#   - Replaced threading-based progress bar with simple poll-based loop.
 #   - Fixed save_report(): same bug as ptmediareadability (JSON printed to
 #     stdout instead of being saved to file)
+#   - Removed _custom_sigint_handler + signal.signal(): handled in base.
+#   - Replaced inline add_properties({7 fields}) with _init_properties()
+#     + separate add_properties for tool-specific fields.
 
 import argparse
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -34,13 +33,6 @@ from ._version import __version__
 from .ptforensictoolbase import ForensicToolBase
 from ptlibs import ptjsonlib, ptprinthelper
 from ptlibs.ptprinthelper import ptprint
-
-
-def _custom_sigint_handler(sig, frame):
-    raise KeyboardInterrupt
-
-
-signal.signal(signal.SIGINT, _custom_sigint_handler)
 
 SCRIPTNAME         = "ptforensicimaging"
 DEFAULT_OUTPUT_DIR = "/var/forensics/images"
@@ -77,21 +69,15 @@ class PtForensicImaging(ForensicToolBase):
         self.mapfile:       Optional[Path]  = None
         self.log_file:      Optional[Path]  = None
 
+        self._init_properties(__version__)
         self.ptjsonlib.add_properties({
-            "caseId":        self.case_id,
-            "analyst":       self.analyst,
-            "timestamp":     datetime.now(timezone.utc).isoformat(),
-            "scriptVersion": __version__,
-            "devicePath":    self.device,
-            "imagingTool":   self.tool,
-            "dryRun":        self.dry_run,
+            "devicePath":  self.device,
+            "imagingTool": self.tool,
         })
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    # NOTE: confirm_write_blocker() is inherited from ForensicToolBase.
 
     def _tool_version(self) -> str:
         r = self._run_command([self.tool, "--version"], timeout=5)
@@ -206,9 +192,6 @@ class PtForensicImaging(ForensicToolBase):
         t0 = time.time()
 
         try:
-            # SIMPLIFIED: replaced threading + Event + _drain() with a simple
-            # poll loop that checks the output file size every second.
-            # Avoids potential stdout buffer deadlock with threading approach.
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True)
@@ -234,7 +217,6 @@ class PtForensicImaging(ForensicToolBase):
                             end="", flush=True)
                         last_pct = pct
 
-            # Drain remaining output after process exits
             output_text, _ = proc.communicate()
             output_lines    = output_text.splitlines() if output_text else []
 
@@ -255,7 +237,6 @@ class PtForensicImaging(ForensicToolBase):
             proc.terminate(); proc.wait()
             raise
 
-        # Extract SHA-256 from log
         if self.log_file.exists():
             for line in self.log_file.read_text().splitlines():
                 if "sha256" in line.lower():
@@ -454,7 +435,6 @@ class PtForensicImaging(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        # FIX: see ptmediareadability.save_report for explanation
         if not self.args.json_out:
             return None
 
