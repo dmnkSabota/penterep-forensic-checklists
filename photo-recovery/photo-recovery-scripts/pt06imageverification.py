@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-    Copyright (c) 2026 Bc. Dominik Sabota, VUT FIT Brno
+    Copyright (c) 2025 Bc. Dominik Sabota, VUT FIT Brno
 
     ptimageverification - Forensic image hash verification tool
 
@@ -9,14 +9,6 @@
     the Free Software Foundation, either version 3 of the License.
     See <https://www.gnu.org/licenses/> for details.
 """
-
-# LAST CHANGES:
-#   - Fixed save_report(): original always saved a JSON file regardless of
-#     whether --json-out was provided. This was inconsistent with all other
-#     tools. Now: saves only when --json-out is provided (or auto-save to
-#     default path when in human mode, matching the pattern of steps 7–13).
-#   - Fixed save_report(): same JSON-to-stdout-instead-of-file bug as
-#     ptmediareadability.
 
 import argparse
 import hashlib
@@ -292,11 +284,6 @@ class PtImageVerification(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        # FIX: original always saved to a default path regardless of --json-out.
-        # Updated to match the pattern of all other tools:
-        #   - --json-out <file>: save to file + print JSON to stdout
-        #   - no --json-out: save to default path (forensic record is important
-        #     for verification – always preserve the result)
         if self.args.json:
             ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
             return None
@@ -351,7 +338,7 @@ def get_help() -> List[Dict]:
         ]},
         {"notes": [
             "Supported formats: .dd / .raw / .img (native SHA-256) | .e01 (ewfverify)",
-            "Always saves a verification report (default: {case_id}_verification_report.json)",
+            "Creates a canonical <image>.sha256 sidecar on success",
             "Exit 0 = VERIFIED | Exit 1 = MISMATCH | Exit 99 = error | Exit 130 = Ctrl+C",
             "Compliant with NIST SP 800-86 §3.1.2 and ISO/IEC 27037:2012 §7.2",
         ]},

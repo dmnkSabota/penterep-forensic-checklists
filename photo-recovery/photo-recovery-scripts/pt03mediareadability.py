@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-    Copyright (c) 2026 Bc. Dominik Sabota, VUT FIT Brno
+    Copyright (c) 2025 Bc. Dominik Sabota, VUT FIT Brno
 
     ptmediareadability - Forensic media readability diagnostic
 
@@ -9,12 +9,6 @@
     the Free Software Foundation, either version 3 of the License.
     See <https://www.gnu.org/licenses/> for details.
 """
-
-# LAST CHANGES:
-#   - Removed confirm_write_blocker() – now inherited from ForensicToolBase
-#   - Fixed save_report(): was printing JSON to stdout instead of saving to file;
-#     now correctly writes to --json-out path and prints raw JSON to stdout
-#     only when in json mode (platform integration behaviour)
 
 import argparse
 import json
@@ -102,9 +96,35 @@ class PtMediaReadability(ForensicToolBase):
                 return int(r["stdout"])
         return 0
 
-    # NOTE: confirm_write_blocker() is inherited from ForensicToolBase.
-    # It was removed from here to eliminate the duplicate that existed
-    # between this class and PtForensicImaging.
+    @staticmethod
+    def confirm_write_blocker() -> bool:
+        """Interactive write-blocker confirmation required before any test."""
+        ptprint("\n" + "!" * 70, "WARNING", condition=True)
+        ptprint("CRITICAL: WRITE-BLOCKER MUST BE CONNECTED",
+                "WARNING", condition=True, colortext=True)
+        ptprint("!" * 70, "WARNING", condition=True)
+        for line in [
+            "  1. Hardware write-blocker is physically connected",
+            "  2. LED indicator shows PROTECTED",
+            "  3. No unusual sounds from the drive",
+            "  4. Media connected THROUGH the write-blocker",
+        ]:
+            ptprint(line, "TEXT", condition=True)
+
+        while True:
+            resp = input("\nConfirm write-blocker is active [y/N]: ").strip().lower()
+            if resp in ("y", "yes"):   ok = True;  break
+            if resp in ("n", "no", ""): ok = False; break
+            ptprint("Please enter 'y' or 'n'.", "WARNING", condition=True)
+
+        sym = "✓" * 70 if ok else "✗" * 70
+        lv  = "OK" if ok else "ERROR"
+        ptprint("\n" + sym, lv, condition=True)
+        ptprint("CONFIRMED – proceeding" if ok
+                else "NOT CONFIRMED – test ABORTED",
+                lv, condition=True, colortext=True)
+        ptprint(sym, lv, condition=True)
+        return ok
 
     # ------------------------------------------------------------------
     # Phase 0 – pre-detection
@@ -424,7 +444,7 @@ class PtMediaReadability(ForensicToolBase):
         if not self.pre_detect() and not self.dry_run:
             self.media_status, self.recommended_tool, self.next_step = (
                 "UNREADABLE", "Physical repair required", 4)
-            self.classify()
+            self.classify()          # record readabilityClassification node
         else:
             self.tests()
             self.classify()
@@ -457,10 +477,10 @@ class PtMediaReadability(ForensicToolBase):
         self.ptjsonlib.set_status("finished")
 
     def save_report(self) -> Optional[str]:
-        # FIX: original code had args.json = bool(args.json_out) which caused
-        # the JSON to be printed to stdout but never saved to the file.
-        # Now: save to file when --json-out is provided; also print raw JSON
-        # to stdout in that mode for platform integration.
+        if self.args.json:
+            ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
+            return None
+
         if not self.args.json_out:
             return None
 
@@ -469,10 +489,7 @@ class PtMediaReadability(ForensicToolBase):
             json.dumps({"result": json.loads(self.ptjsonlib.get_result_json())},
                        indent=2, ensure_ascii=False),
             encoding="utf-8")
-        # Print raw JSON to stdout for platform integration (args.json is True
-        # when json_out is provided – used by _out() to suppress human output)
-        ptprint(self.ptjsonlib.get_result_json(), "", self.args.json)
-        ptprint(f"✓ JSON saved: {out}", "OK", condition=not self.args.json)
+        ptprint(f"\n✓ JSON saved: {out}", "OK", condition=True)
         return str(out)
 
 
@@ -529,8 +546,7 @@ def parse_args() -> argparse.Namespace:
         ptprinthelper.help_print(get_help(), SCRIPTNAME, __version__)
         sys.exit(0)
 
-    args = p.parse_args()
-    # args.json drives _out() → True suppresses human-readable terminal output
+    args      = p.parse_args()
     args.json = bool(args.json_out)
     if args.json:
         args.quiet = True
@@ -543,7 +559,6 @@ def main() -> int:
         args = parse_args()
 
         if not args.dry_run:
-            # confirm_write_blocker is now defined in ForensicToolBase
             if not PtMediaReadability.confirm_write_blocker():
                 ptprint("\nTest ABORTED – write-blocker is REQUIRED!",
                         "ERROR", condition=True, colortext=True)
