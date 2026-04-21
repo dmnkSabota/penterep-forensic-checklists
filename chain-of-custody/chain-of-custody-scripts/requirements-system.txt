@@ -1,0 +1,21 @@
+# coc-scripts — system tool dependencies
+# Install with: sudo apt-get install <package>
+#
+# Tested on Ubuntu 22.04 LTS / Debian 12.
+
+# ── Step 04 · ptforensicimaging (reused from photo-recovery-scripts) ──────────
+dc3dd               # dc3dd  (READABLE media imaging)
+gddrescue           # ddrescue  (PARTIAL/damaged media imaging)
+coreutils           # sha256sum  (usually pre-installed)
+util-linux          # lsblk, blockdev  (usually pre-installed)
+
+# ── Step 05 · ptimageverification (reused from photo-recovery-scripts) ────────
+# No additional system tools required.
+# E01 image support (optional):
+# libewf-tools       # ewfverify
+
+# ── Step 06 · ptcocmanager ───────────────────────────────────────────────────
+# No additional system tools required.
+
+# ── One-liner: install all at once ───────────────────────────────────────────
+# sudo apt-get install dc3dd gddrescue util-linux coreutils
