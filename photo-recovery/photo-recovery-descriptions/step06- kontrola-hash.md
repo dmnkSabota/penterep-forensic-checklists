@@ -51,32 +51,17 @@ ptimageverification ${CASE_ID} ${IMAGE} ${SOURCE_HASH} \
   --json-out ${CASE_ID}_verification.json
 ```
 
-Nástroj automaticky:
-- Overí formát source_hash (64 hex znakov)
-- Nájde a validuje forenzný obraz
-- Vypočíta SHA-256 hash obrazu (image_hash)
-- Porovná oba hashe
-- Vygeneruje JSON report
-- Vytvorí kanonický hash súbor `.sha256`
-- Aktualizuje Chain of Custody
+Nástroj automaticky overí formát source_hash, vypočíta image_hash, porovná oba hashe, vytvorí kanonický hash súbor `.sha256` a aktualizuje Chain of Custody.
 
-**3. Výpočet image_hash:**
+**3. Podporované formáty obrazov:**
 
-Pre `.dd` a `.raw` súbory nástroj používa `hashlib` s 4 MB chunks:
-```python
-sha256 = hashlib.sha256()
-with open(image_file, 'rb') as f:
-    while chunk := f.read(4 * 1024 * 1024):
-        sha256.update(chunk)
-image_hash = sha256.hexdigest()
-```
+Nástroj podporuje `.dd` a `.raw` formáty priamym výpočtom SHA-256, ako aj `.e01` formát prostredníctvom `ewfverify`. Progress sa zobrazuje každých 1 GB s aktuálnou rýchlosťou čítania.
 
-Pre `.e01` súbory nástroj používa `ewfverify`:
+Ak automatický nástroj nie je dostupný, vypočítajte `image_hash` manuálne:
 ```bash
-ewfverify -d sha256 image.e01
+sha256sum /var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd
 ```
-
-Progress sa zobrazuje každých 1 GB s aktuálnou rýchlosťou čítania.
+Výstup porovnajte so `source_hash` z imaging logu znak po znaku. Pri zhode pokračujte, pri nezhode opakujte imaging.
 
 **4. Porovnanie hashov:**
 
@@ -102,42 +87,43 @@ sha256sum -c /var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd.sha256
 
 Výstup by mal byť: `PHOTORECOVERY-2025-01-26-001.dd: OK`
 
-**6. JSON output (voliteľné):**
+**6. Zápis výsledkov a aktualizácia CoC:**
 
-Pri použití `--json-out` sa vytvorí JSON s forensic metadata:
+Pri použití `--json-out` sa vytvorí JSON s forensic metadata. Analytik manuálne skopíruje oba záznamy do `case.json`.
 
+Pridávaný objekt `hashVerification`:
 ```json
-{
-  "hashVerification": {
-    "version": "1.0.0",
-    "compliance": ["NIST SP 800-86", "ISO/IEC 27037:2012"],
-    "caseId": "PHOTORECOVERY-2025-01-26-001",
-    "timestamp": "2025-01-26T13:00:00Z",
-    "analyst": "Meno Analytika",
-    "image": {
-      "imagePath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd",
-      "imageFormat": ".dd",
-      "imageSizeBytes": 32017047552
-    },
-    "verification": {
-      "algorithm": "SHA-256",
-      "sourceHash": "a3f5e8c9d2b1a7f4e6c8d9a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2",
-      "imageHash": "a3f5e8c9d2b1a7f4e6c8d9a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2",
-      "hashMatch": true,
-      "verificationStatus": "VERIFIED",
-      "calculationTimeSeconds": 1847.5
-    }
+"hashVerification": {
+  "version": "1.0.0",
+  "compliance": ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+  "caseId": "PHOTORECOVERY-2025-01-26-001",
+  "timestamp": "2025-01-26T13:00:00Z",
+  "analyst": "Meno Analytika",
+  "image": {
+    "imagePath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd",
+    "imageFormat": ".dd",
+    "imageSizeBytes": 32017047552
   },
-  "chainOfCustodyEntry": {
-    "action": "Verifikácia integrity obrazu – výsledok: VERIFIED",
-    "result": "SUCCESS",
-    "analyst": "Meno Analytika",
-    "timestamp": "2025-01-26T13:30:00Z"
+  "verification": {
+    "algorithm": "SHA-256",
+    "sourceHash": "a3f5e8c9d2b1a7f4e6c8d9a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2",
+    "imageHash": "a3f5e8c9d2b1a7f4e6c8d9a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2",
+    "hashMatch": true,
+    "verificationStatus": "VERIFIED",
+    "calculationTimeSeconds": 1847.5
   }
 }
 ```
 
-Analytik manuálne skopíruje JSON obsah do dokumentácie prípadu.
+Nový záznam do poľa `chainOfCustody`:
+```json
+{
+  "timestamp": "2025-01-26T13:30:00Z",
+  "analyst": "Meno Analytika",
+  "action": "Verifikácia integrity obrazu – výsledok: VERIFIED",
+  "mediaSerial": "SN-XXXXXXXX"
+}
+```
 
 ## Výsledek
 
@@ -145,14 +131,17 @@ SHA-256 `image_hash` vypočítaný a porovnaný so `source_hash`. Pri MATCH work
 
 ## Reference
 
-- NIST SP 800-86 – Section 3.1.2 (Examination Phase – Data Integrity Verification)
-- ISO/IEC 27037:2012 – Section 7.2 (Verification of integrity of digital evidence)
-- NIST FIPS 180-4 – Secure Hash Standard (SHA-256 algorithm)
-- RFC 6234 – US Secure Hash Algorithms
+NIST SP 800-86 – Section 2.2 (Examination)
+
+ISO/IEC 27037:2012 – Section 5.4 (Acquisition)
+
+NIST FIPS 180-4 – Secure Hash Standard (SHA-256 algorithm)
+
+RFC 6234 – US Secure Hash Algorithms
 
 ## Stav
 
-Implementované
+K otestovaniu
 
 ## Nález
 

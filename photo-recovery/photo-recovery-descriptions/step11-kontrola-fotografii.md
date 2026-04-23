@@ -22,7 +22,7 @@ Tento krok načíta výsledky validácie integrity a pre každý REPAIRABLE súb
 
 Rozhodnutia: `ATTEMPT_REPAIR` (postúpi do opravy fotografií), `MANUAL_REVIEW` (príznak pre analytika, automatická oprava sa nevykoná), `SKIP` (súbor je považovaný za neopraviteľný).
 
-Miery úspešnosti vychádzajú z empirického testovania autora (50 syntetických testovacích prípadov na typ poškodenia) a sú podporené odkazmi v literatúre: Kessler (2016), Garfinkel et al. (2009), NIST SP 800-86 §4.1.
+Miery úspešnosti vychádzajú z odhadov podporených odkazmi v literatúre: Kessler (2016) a Garfinkel et al. (2009).
 
 ## Jak na to
 
@@ -57,31 +57,46 @@ Pre každý REPAIRABLE súbor skript priradí odhadovanú mieru úspešnosti opr
 | `fragmented` | 15 % | Garfinkel et al. (2009); viacfragmentové skladanie zriedka vedie k plne dekódovateľnému obrazu |
 | `unknown` | 30 % | Konzervatívny odhad pre neklasifikované prípady |
 
-Na základe miery úspešnosti sa aplikujú pravidlá R1–R5 v poradí, prvé platné pravidlo rozhoduje:
+Na základe miery úspešnosti sa aplikujú pravidlá R1–R3 v poradí, prvé platné pravidlo rozhoduje:
 
 | Pravidlo | Podmienka | Rozhodnutie |
 |---|---|---|
-| R1 | Úspešnosť ≥ 85 % | `ATTEMPT_REPAIR` |
-| R2 | 50 % ≤ úspešnosť < 85 % | `ATTEMPT_REPAIR` |
-| R3 | 30 % ≤ úspešnosť < 50 % | `MANUAL_REVIEW` |
-| R4 | 15 % ≤ úspešnosť < 30 % | `SKIP` |
-| R5 | Úspešnosť < 15 % | `SKIP` |
+| R1 | Úspešnosť ≥ 50 % | `ATTEMPT_REPAIR` |
+| R2 | 30 % ≤ úspešnosť < 50 % | `MANUAL_REVIEW` |
+| R3 | Úspešnosť < 30 % | `SKIP` |
+
+Ak automatický nástroj nie je dostupný, otvorte `{CASE_ID}_integrity_validation.json`, pre každý súbor so statusom `REPAIRABLE` vyhľadajte `corruptionType` v tabuľke vyššie, aplikujte pravidlá R1–R3 a výsledné rozhodnutie zapíšte ručne do `{CASE_ID}_repair_decisions.json`.
 
 **3. Zápis výsledkov a aktualizácia CoC:**
 
-Zapíšte výsledky rozhodnutia do dokumentácie prípadu:
-- Celkový počet REPAIRABLE súborov
-- Počet `ATTEMPT_REPAIR`
-- Počet `MANUAL_REVIEW`
-- Počet `SKIP`
-- Rozloženie podľa typu poškodenia a použitého pravidla
+Pri použití `--json-out` sa vytvorí JSON s výsledkami. Analytik manuálne skopíruje oba záznamy do `case.json`.
 
-Pridajte záznam do Chain of Custody:
+Pridávaný objekt `repairDecision`:
+```json
+"repairDecision": {
+  "timestamp": "2025-01-26T16:05:00Z",
+  "analyst": "Meno Analytika",
+  "totalRepairable": 198,
+  "attemptRepair": 156,
+  "manualReview": 29,
+  "skip": 13,
+  "decisionBreakdown": {
+    "missing_footer": {"count": 87, "decision": "ATTEMPT_REPAIR", "rule": "R1"},
+    "truncated": {"count": 64, "decision": "ATTEMPT_REPAIR", "rule": "R1"},
+    "corrupt_segments": {"count": 31, "decision": "ATTEMPT_REPAIR", "rule": "R1"},
+    "corrupt_data": {"count": 16, "decision": "MANUAL_REVIEW", "rule": "R2"}
+  },
+  "decisionFile": "PHOTORECOVERY-2025-01-26-001_repair_decisions.json"
+}
+```
+
+Nový záznam do poľa `chainOfCustody`:
 ```json
 {
   "timestamp": "2025-01-26T16:05:00Z",
   "analyst": "Meno Analytika",
-  "action": "Rozhodnutie o oprave dokončené – N ATTEMPT_REPAIR, M MANUAL_REVIEW, K SKIP"
+  "action": "Rozhodnutie o oprave dokončené – 156 ATTEMPT_REPAIR, 29 MANUAL_REVIEW, 13 SKIP",
+  "mediaSerial": "SN-XXXXXXXX"
 }
 ```
 
@@ -97,9 +112,12 @@ Archivujte do dokumentácie prípadu:
 ## Reference
 
 Kessler, G.C. (2016). Anti-forensics and the Digital Investigator. Proceedings of the 5th Australian Digital Forensics Conference. doi:10.4225/75/57B2667BE45CF
+
 Garfinkel, S., Farrell, P., Roussev, V., & Dinolt, G. (2009). Bringing Science to Digital Forensics with Standardized Forensic Corpora. Digital Investigation, 6, S2–S11.
-NIST SP 800-86 – Section 4.1 (Recovery decisions)
-ISO/IEC 27037:2012 – Section 7.6 (Decision making)
+
+ISO/IEC 27042:2015 – Section 5 (Digital evidence analysis)
+
+NIST SP 800-86 – Section 2.3 (Analysis)
 
 ## Stav
 

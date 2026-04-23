@@ -64,24 +64,58 @@ Klasifikácia výsledku:
 - **REPAIRABLE** – prejde základnou validáciou, štruktúrna validácia odhalí opraviteľné poškodenie
 - **CORRUPTED** – závažné poškodenie, pravdepodobne neopraviteľné
 
+Ak automatický nástroj nie je dostupný, vykonajte validáciu manuálne pre každý súbor:
+```bash
+# Stupeň 1
+file -b subor.jpg
+identify subor.jpg 2>&1
+
+# Stupeň 2 – JPEG
+jpeginfo -c subor.jpg
+
+# Stupeň 2 – PNG
+pngcheck -v subor.png
+
+# Stupeň 2 – TIFF
+tiffinfo subor.tiff
+```
+
+Výsledok zaznamenajte ručne do `{CASE_ID}_integrity_validation.json` s poliami `path`, `status` a `corruptionType`.
+
 Súbory sa fyzicky nepresúvajú. Stav každého súboru sa zaznamenáva iba v JSON výstupe.
 
 **4. Zápis výsledkov a aktualizácia CoC:**
 
-Zapíšte výsledky validácie do dokumentácie prípadu:
-- Celkový počet validovaných súborov
-- Počet VALID súborov
-- Počet REPAIRABLE súborov
-- Počet CORRUPTED súborov
-- Miera úspešnosti (%)
-- Rozloženie typov poškodenia
+Pri použití `--json-out` sa vytvorí JSON s výsledkami. Analytik manuálne skopíruje oba záznamy do `case.json`.
 
-Pridajte záznam do Chain of Custody:
+Pridávaný objekt `integrityValidation`:
+```json
+"integrityValidation": {
+  "timestamp": "2025-01-26T16:00:00Z",
+  "analyst": "Meno Analytika",
+  "totalValidated": 2612,
+  "valid": 2341,
+  "repairable": 198,
+  "corrupted": 73,
+  "successRate": 89.6,
+  "corruptionTypes": {
+    "missing_footer": 87,
+    "truncated": 64,
+    "corrupt_segments": 31,
+    "invalid_header": 16,
+    "unknown": 0
+  },
+  "validationCatalog": "PHOTORECOVERY-2025-01-26-001_integrity_validation.json"
+}
+```
+
+Nový záznam do poľa `chainOfCustody`:
 ```json
 {
   "timestamp": "2025-01-26T16:00:00Z",
   "analyst": "Meno Analytika",
-  "action": "Validácia integrity dokončená – N VALID, M REPAIRABLE, K CORRUPTED (in-place, bez kópií)"
+  "action": "Validácia integrity dokončená – 2341 VALID, 198 REPAIRABLE, 73 CORRUPTED (in-place, bez kópií)",
+  "mediaSerial": "SN-XXXXXXXX"
 }
 ```
 
@@ -96,9 +130,12 @@ Každý súbor v konsolidovanom adresári je klasifikovaný ako VALID, REPAIRABL
 
 ## Reference
 
-NIST SP 800-86 – Section 3.1.3 (Data Analysis)
-ISO/IEC 27037:2012 – Section 7.3 (Data quality assessment)
+ISO/IEC 27042:2015 – Section 5 (Digital evidence analysis)
+
+NIST SP 800-86 – Section 2.3 (Analysis)
+
 ImageMagick Documentation (https://imagemagick.org/)
+
 LibJPEG / JPEGInfo Documentation
 
 ## Stav

@@ -94,7 +94,8 @@ Pridajte záverečný záznam do `case.json`:
 {
   "timestamp": "2025-01-26T18:00:00Z",
   "analyst": "Meno Analytika",
-  "action": "Záverečná správa vygenerovaná a podpísaná – pripravená na odovzdanie"
+  "action": "Záverečná správa vygenerovaná a podpísaná – pripravená na odovzdanie",
+  "mediaSerial": "SN-XXXXXXXX"
 }
 ```
 
@@ -111,14 +112,17 @@ Záverečná správa s 10 sekciami podpísaná oboma stranami a pripravená na o
 
 ## Reference
 
-ISO/IEC 27037:2012 – Section 8 (Documentation and reporting)
-NIST SP 800-86 – Section 4 (Reporting Phase)
-ACPO Good Practice Guide – Principle 4 (Documentation)
+ISO/IEC 27042:2015 – Section 6 (Reporting)
+
+NIST SP 800-86 – Section 2.4 (Reporting)
+
+ACPO Good Practice Guide – Principle 4 (Overall responsibility for compliance)
+
 SWGDE Best Practices for Digital and Multimedia Evidence
 
 ## Stav
 
-Manuálny proces – netestovateľný automaticky
+K otestovaniu
 
 ## Nález
 

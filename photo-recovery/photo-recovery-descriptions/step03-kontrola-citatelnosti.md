@@ -59,7 +59,7 @@ Pre HDD a SSD skontrolujte SMART zdravotné dáta:
 ```bash
 smartctl -a /dev/sdX
 ```
-Sledujte: Reallocated Sector Count (>50 = kriticky poškodený), Current Pending Sector Count (>0 = aktívne zlyháva), Uncorrectable Sector Count a teplotu (>45 °C = riziko). Flash médiá SMART nepodporujú – chyba príkazu je v poriadku.
+Sledujte: Reallocated Sector Count (vyššie hodnoty naznačujú poškodenie), Current Pending Sector Count (>0 = aktívne zlyháva), Uncorrectable Sector Count a teplotu (zvýšená teplota predstavuje riziko – referenčné hodnoty sa líšia podľa výrobcu). Flash médiá SMART nepodporujú – chyba príkazu je v poriadku.
 
 Pre SSD zariadenia zaznamenajte TRIM support status:
 ```bash
@@ -92,7 +92,7 @@ dd if=/dev/sdX of=/dev/null bs=512 count=1 skip=$(($(blockdev --getsize64 /dev/s
 dd if=/dev/sdX of=/dev/null bs=512 count=1 skip=$(($(blockdev --getsize64 /dev/sdX) / 512 - 20480)) status=none
 ```
 
-Zmerajte rýchlosť čítania 10 MB – pod 5 MB/s znamená extrémne dlhý imaging alebo riziko zlyhania:
+Zmerajte rýchlosť čítania 10 MB – výrazne nízka rýchlosť môže naznačovať extrémne dlhý imaging alebo riziko zlyhania počas procesu:
 ```bash
 dd if=/dev/sdX of=/dev/null bs=512 count=20480 status=progress
 ```
@@ -108,40 +108,40 @@ Ak boli identifikované kritické nálezy (aktívny TRIM, zlý SMART status, ši
 
 **6. Zápis výsledkov a aktualizácia CoC:**
 
-Pri použití `--json-out` skript vytvorí JSON s forensic metadata:
+Pri použití `--json-out` skript vytvorí JSON s forensic metadata. Analytik manuálne skopíruje oba záznamy do `case.json`.
 
+Pridávaný objekt `readabilityTest`:
 ```json
-{
-  "readabilityTest": {
-    "version": "1.0.0",
-    "compliance": ["NIST SP 800-86", "ISO/IEC 27037:2012"],
-    "caseId": "PHOTORECOVERY-2025-01-26-001",
-    "timestamp": "2025-01-26T10:00:00Z",
-    "analyst": "Meno Analytika",
-    "device": {
-      "devicePath": "/dev/sdb",
-      "mediaStatus": "READABLE",
-      "recommendedTool": "dc3dd",
-      "nextStep": 5
-    },
-    "criticalFindings": [],
-    "statistics": {
-      "testsRun": 4,
-      "testsPassed": 4,
-      "testsFailed": 0
-    }
+"readabilityTest": {
+  "version": "1.0.0",
+  "compliance": ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+  "caseId": "PHOTORECOVERY-2025-01-26-001",
+  "timestamp": "2025-01-26T10:00:00Z",
+  "analyst": "Meno Analytika",
+  "device": {
+    "devicePath": "/dev/sdb",
+    "mediaStatus": "READABLE",
+    "recommendedTool": "dc3dd"
   },
-  "chainOfCustodyEntry": {
-    "action": "Test čitateľnosti média – výsledok: READABLE",
-    "result": "SUCCESS",
-    "analyst": "Meno Analytika",
-    "timestamp": "2025-01-26T10:00:00Z",
-    "selectedTool": "dc3dd"
+  "criticalFindings": [],
+  "statistics": {
+    "testsRun": 4,
+    "testsPassed": 4,
+    "testsFailed": 0
   }
 }
 ```
 
-Analytik manuálne skopíruje oba záznamy do `case.json`.
+Nový záznam do poľa `chainOfCustody`:
+```json
+{
+  "action": "Test čitateľnosti média – výsledok: READABLE",
+  "result": "SUCCESS",
+  "analyst": "Meno Analytika",
+  "timestamp": "2025-01-26T10:00:00Z",
+  "selectedTool": "dc3dd"
+}
+```
 
 ## Výsledek
 
@@ -149,8 +149,10 @@ Stav média je klasifikovaný ako READABLE, PARTIAL alebo UNREADABLE. Výsledky 
 
 ## Reference
 
-ISO/IEC 27037:2012 – Section 6.3 (Acquisition of digital evidence)
-NIST SP 800-86 – Section 3.1.1.3 (Data Collection Methodology)
+ISO/IEC 27037:2012 – Section 5.3 (Collection)
+
+NIST SP 800-86 – Section 2.1 (Collection)
+
 ACPO Good Practice Guide – Principle 1 (No action should change data)
 
 ## Stav

@@ -80,23 +80,32 @@ exiftool -json subor > "${OUTPUT_DIR}/metadata/nazov_suboru.json"
 
 **5. Zápis výsledkov a aktualizácia CoC:**
 
-Zapíšte výsledky filesystem recovery do dokumentácie prípadu:
-- Metóda obnovy – filesystem_scan / hybrid
-- Počet prehľadaných súborov
-- Počet obnovených aktívnych súborov
-- Počet obnovených vymazaných súborov
-- Počet poškodených súborov
-- Úspešnosť obnovy aktívnych súborov (%)
-- Úspešnosť obnovy vymazaných súborov (%)
-- Extrakcia metadát – áno / nie
-- Nutnosť následného File Carving – áno / nie (pri `hybrid`)
+Pri použití `--json-out` sa vytvorí JSON s výsledkami. Analytik manuálne skopíruje oba záznamy do `case.json`.
 
-Pridajte záznam do Chain of Custody:
+Pridávaný objekt `filesystemRecovery`:
+```json
+"filesystemRecovery": {
+  "timestamp": "2025-01-26T14:00:00Z",
+  "analyst": "Meno Analytika",
+  "recoveryMethod": "filesystem_scan",
+  "scannedFiles": 1247,
+  "recoveredActive": 834,
+  "recoveredDeleted": 389,
+  "corrupted": 24,
+  "successRateActive": 100.0,
+  "successRateDeleted": 94.2,
+  "metadataExtracted": true,
+  "fileCarvingRequired": false
+}
+```
+
+Nový záznam do poľa `chainOfCustody`:
 ```json
 {
   "timestamp": "2025-01-26T14:00:00Z",
   "analyst": "Meno Analytika",
-  "action": "Filesystem recovery dokončená – obnovených N súborov (X aktívnych, Y vymazaných)"
+  "action": "Filesystem recovery dokončená – obnovených 1223 súborov (834 aktívnych, 389 vymazaných)",
+  "mediaSerial": "SN-XXXXXXXX"
 }
 ```
 
@@ -110,9 +119,11 @@ Obnovené súbory uložené v `${CASE_ID}_recovered/`: aktívne v `active/`, vym
 
 ## Reference
 
-ISO/IEC 27037:2012 – Section 7.3 (Data Extraction)
-NIST SP 800-86 – Section 3.1.2.2 (File System Recovery)
-The Sleuth Kit Documentation (fls, icat)
+ISO/IEC 27042:2015 – Section 5 (Digital evidence analysis)
+
+NIST SP 800-86 – Section 2.2 (Examination)
+
+The Sleuth Kit Documentation – fls, icat
 
 ## Stav
 

@@ -30,8 +30,7 @@ Podporované formáty: JPEG (byte-level oprava), PNG (PIL resave). TIFF a RAW ni
 
 Skontrolujte výstup rozhodovacieho kroku (`{CASE_ID}_repair_decisions.json`) – ak neobsahuje žiadne záznamy s `ATTEMPT_REPAIR`, tento nástroj preskočte a pokračujte na EXIF analýzu.
 
-Poznačte si:
-- Cestu k `{CASE_ID}_repair_decisions.json` (štandardne v output adresári)
+Poznačte si cestu k `{CASE_ID}_repair_decisions.json` (štandardne v output adresári).
 
 **2. Inštalácia závislostí:**
 
@@ -60,21 +59,13 @@ ptphotorepair ${CASE_ID} \
 ptphotorepair ${CASE_ID} --dry-run
 ```
 
-Nástroj pre každý súbor s rozhodnutím `ATTEMPT_REPAIR`:
-- Vytvorí pracovnú kópiu (`shutil.copy2`) – originál sa nemení
-- Priradí techniku podľa `corruptionType` a vykoná opravu
-- Validuje výsledok (PIL + jpeginfo)
-- Uloží do `{CASE_ID}_repaired/` (úspech) alebo `{CASE_ID}_repair_failed/` (zlyhanie)
+Skript pre každý súbor s rozhodnutím `ATTEMPT_REPAIR` vytvorí pracovnú kópiu (`shutil.copy2`), priradí techniku podľa `corruptionType`, vykoná opravu, validuje výsledok (PIL + jpeginfo) a uloží do `{CASE_ID}_repaired/` (úspech) alebo `{CASE_ID}_repair_failed/` (zlyhanie).
 
-Exit kódy:
-- `0` – aspoň jeden súbor úspešne opravený
-- `1` – žiadny súbor nebol opravený
-- `99` – chyba (chýbajúci vstup, PIL nedostupný)
-- `130` – prerušené užívateľom (Ctrl+C)
+Exit kódy: `0` – aspoň jeden súbor úspešne opravený, `1` – žiadny súbor nebol opravený, `99` – chyba (chýbajúci vstup, PIL nedostupný), `130` – prerušené užívateľom (Ctrl+C).
 
-**4. Manuálna oprava (záložná metóda):**
+**4. Opravné techniky podľa typu poškodenia:**
 
-Ak automatický nástroj nie je dostupný, použite priame techniky podľa typu poškodenia. Vždy pracujte na kópii súboru – originál sa nesmie meniť.
+Vždy pracujte na kópii súboru – originál sa nesmie meniť. Skript tieto kroky vykonáva automaticky; pri manuálnom postupe použite nasledujúce techniky.
 
 **Chýbajúci EOI marker (`missing_footer`) – doplnenie FF D9 na koniec súboru:**
 ```python
@@ -120,7 +111,7 @@ img.load()
 img.save(work, "JPEG", quality=95, optimize=True)
 ```
 
-Po každej oprave validujte výsledok:
+Po každej manuálnej oprave validujte výsledok:
 ```bash
 jpeginfo -c /tmp/working_IMG_001.jpg
 identify /tmp/working_IMG_001.jpg 2>&1
@@ -128,19 +119,30 @@ identify /tmp/working_IMG_001.jpg 2>&1
 
 **5. Zápis výsledkov a aktualizácia CoC:**
 
-Zapíšte výsledky do dokumentácie prípadu:
-- Celkový počet pokusov o opravu
-- Počet úspešne opravených súborov
-- Počet neúspešných opráv
-- Miera úspešnosti (%)
-- Pre každý súbor: typ poškodenia, použitá technika, výsledok (`repair_done` / `repair_failed`)
+Pri použití `--json-out` sa vytvorí JSON s výsledkami. Analytik manuálne skopíruje oba záznamy do `case.json`.
 
-Pridajte záznam do Chain of Custody:
+Pridávaný objekt `photoRepair`:
+```json
+"photoRepair": {
+  "timestamp": "2025-01-26T17:00:00Z",
+  "analyst": "Meno Analytika",
+  "totalAttempted": 156,
+  "repaired": 134,
+  "failed": 22,
+  "successRate": 85.9,
+  "repairedPath": "PHOTORECOVERY-2025-01-26-001_repaired/",
+  "failedPath": "PHOTORECOVERY-2025-01-26-001_repair_failed/",
+  "reportFile": "PHOTORECOVERY-2025-01-26-001_repair_report.json"
+}
+```
+
+Nový záznam do poľa `chainOfCustody`:
 ```json
 {
   "timestamp": "2025-01-26T17:00:00Z",
   "analyst": "Meno Analytika",
-  "action": "Oprava fotografií dokončená – N úspešných, M neúspešných"
+  "action": "Oprava fotografií dokončená – 134 úspešných, 22 neúspešných",
+  "mediaSerial": "SN-XXXXXXXX"
 }
 ```
 
@@ -155,9 +157,13 @@ Opravené súbory v `${CASE_ID}_repaired/`, neopraviteľné v `${CASE_ID}_repair
 
 ## Reference
 
+ISO/IEC 27042:2015 – Section 5 (Digital evidence analysis)
+
 ISO/IEC 10918-1 – JPEG Standard (ITU-T T.81)
+
 JFIF Specification v1.02
-NIST SP 800-86 – Section 3.1.4 (Data Recovery and Repair)
+
+NIST SP 800-86 – Section 2.3 (Analysis)
 
 ## Stav
 

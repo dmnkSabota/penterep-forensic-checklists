@@ -14,7 +14,7 @@ Jednoduchá
 
 ## Automatický test
 
-Automatický
+Áno
 
 ## Popis
 
@@ -39,7 +39,7 @@ lsblk -d -o NAME,SIZE
 
 **2. Kontrola dostupného miesta:**
 
-Uistite sa, že cieľové úložisko má minimálne 110 % kapacity zdrojového média:
+Uistite sa, že cieľové úložisko má dostatočnú rezervu kapacity oproti zdrojovému médiu – odporúča sa minimálne rovnaká kapacita plus rezerva pre log súbory a metadata:
 ```bash
 df -h /var/forensics/images
 lsblk -d -o NAME,SIZE /dev/sdX
@@ -110,61 +110,54 @@ sha256sum -c CASE-ID.dd.sha256
 
 **7. Zápis výsledkov a aktualizácia CoC:**
 
-Pri použití `--json-out` sa vytvorí JSON s forensic metadata:
+Pri použití `--json-out` skript vytvorí JSON s forensic metadata. Analytik manuálne skopíruje oba záznamy do `case.json`.
 
+Pridávaný objekt `forensicImaging`:
 ```json
-{
-  "forensicImaging": {
-    "version": "1.0.0",
-    "compliance": ["NIST SP 800-86", "ISO/IEC 27037:2012"],
-    "caseId": "PHOTORECOVERY-2025-01-26-001",
-    "timestamp": "2025-01-26T12:00:00Z",
-    "analyst": "Meno Analytika",
-    "source": {
-      "devicePath": "/dev/sdb",
-      "mediaStatus": "READABLE",
-      "sizeBytes": 32017047552
-    },
-    "acquisition": {
-      "tool": "dc3dd",
-      "toolVersion": "7.2.646",
-      "method": "single-pass with integrated hashing",
-      "durationSeconds": 1847.5,
-      "averageSpeedMBps": 16.5
-    },
-    "output": {
-      "imagePath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd",
-      "imageFormat": "raw (.dd)",
-      "imageSizeBytes": 32017047552,
-      "imagingLog": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001_imaging.log",
-      "hashFile": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd.sha256"
-    },
-    "integrity": {
-      "writeBlockerConfirmed": true,
-      "errorSectors": 0,
-      "hashAlgorithm": "SHA-256",
-      "sourceHash": "a3f5e8c9d2b1a7f4e6c8d9a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2",
-      "verified": true
-    },
-    "chainOfCustody": {
-      "action": "Forensic imaging completed",
-      "result": "SUCCESS",
-      "analyst": "Meno Analytika",
-      "timestamp": "2025-01-26T12:30:00Z"
-    }
+"forensicImaging": {
+  "version": "1.0.0",
+  "compliance": ["NIST SP 800-86", "ISO/IEC 27037:2012"],
+  "caseId": "PHOTORECOVERY-2025-01-26-001",
+  "timestamp": "2025-01-26T12:00:00Z",
+  "analyst": "Meno Analytika",
+  "source": {
+    "devicePath": "/dev/sdb",
+    "mediaStatus": "READABLE",
+    "sizeBytes": 32017047552
+  },
+  "acquisition": {
+    "tool": "dc3dd",
+    "toolVersion": "7.2.646",
+    "method": "single-pass with integrated hashing",
+    "durationSeconds": 1847.5,
+    "averageSpeedMBps": 16.5
+  },
+  "output": {
+    "imagePath": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd",
+    "imageFormat": "raw (.dd)",
+    "imageSizeBytes": 32017047552,
+    "imagingLog": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001_imaging.log",
+    "hashFile": "/var/forensics/images/PHOTORECOVERY-2025-01-26-001.dd.sha256"
+  },
+  "integrity": {
+    "writeBlockerConfirmed": true,
+    "errorSectors": 0,
+    "hashAlgorithm": "SHA-256",
+    "sourceHash": "a3f5e8c9d2b1a7f4e6c8d9a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2",
+    "verified": true
   }
 }
 ```
 
-JSON štruktúra:
-- `compliance` – explicitné deklarovanie štandardov (NIST, ISO)
-- `source` – informácie o zdrojovom médiu
-- `acquisition` – detaily procesu (tool, metóda, trvanie, rýchlosť)
-- `output` – vytvorené súbory (obraz, log, hash)
-- `integrity` – verifikácia (write-blocker, error sectors, hash)
-- `chainOfCustody` – audit trail záznam
-
-Analytik manuálne skopíruje JSON obsah do `case.json`.
+Nový záznam do poľa `chainOfCustody`:
+```json
+{
+  "timestamp": "2025-01-26T12:30:00Z",
+  "analyst": "Meno Analytika",
+  "action": "Forenzný imaging dokončený – nástroj: dc3dd, výsledok: SUCCESS",
+  "mediaSerial": "SN-XXXXXXXX"
+}
+```
 
 **8. Archivácia výstupov:**
 
@@ -184,9 +177,12 @@ Workflow pokračuje do verifikácie integrity obrazu.
 
 ## Reference
 
-ISO/IEC 27037:2012 – Section 6.3 (Acquisition of digital evidence)  
-NIST SP 800-86 – Section 3.1.1 (Collection Phase – Forensic Imaging)  
-ACPO Good Practice Guide – Principle 1 & 2 (Evidence preservation)  
+ISO/IEC 27037:2012 – Section 5.4 (Acquisition of digital evidence)
+
+NIST SP 800-86 – Section 2.1 (Collection)
+
+ACPO Good Practice Guide – Principle 1 (No action should change data) & Principle 2 (Competence of personnel performing acquisition)
+
 NIST FIPS 180-4 – Secure Hash Standard (SHA-256 specification)
 
 ## Stav

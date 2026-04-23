@@ -66,34 +66,58 @@ PhotoRec beží v neinteraktívnom dávkovom režime – spúšťa sa automatick
 photorec /log /d <pracovny_adresar> /cmd <forenzny_obraz> search
 ```
 
-PhotoRec obnoví všetky typy súborov, ktoré v obraze nájde – filtrovanie na obrazové formáty prebieha v nasledujúcom kroku validácie. Výstup postupu sa priebežne zobrazuje na terminál a zaznamenáva do log súboru `{CASE_ID}_photorec.log`. Čas behu závisí od veľkosti média (5 minút až 8 hodín).
+Ak automatický nástroj nie je dostupný, spustite PhotoRec priamo týmto príkazom. Výstup postupu sa priebežne zobrazuje na terminál a zaznamenáva do log súboru `{CASE_ID}_photorec.log`. Čas behu závisí od veľkosti média.
 
 **4. Validácia a deduplikácia:**
 
-Po dokončení PhotoRec skript automaticky:
-- Prefiltruje nájdené súbory podľa prípony (len obrazové formáty z `IMAGE_EXTENSIONS`)
-- Pre každý kandidát vykoná SHA-256 deduplikáciu (duplicitné súbory presunie do `duplicates/`)
-- Validuje každý unikátny súbor: `file -b` → `identify` (ImageMagick)
-- Platné súbory presunie do `valid/<format>/` (jpg/, png/, tiff/, raw/, other/)
-- Poškodené súbory presunie do `corrupted/`
+Skript automaticky prefiltruje, deduplikuje a validuje výsledky. Ak skript nie je dostupný, vykonajte kroky manuálne:
+
+Prefiltrujte na obrazové prípony:
+```bash
+find <pracovny_adresar> -type f | grep -iE '\.(jpg|jpeg|png|tiff?|bmp|gif|raw|cr2|nef|arw|dng|heic|webp)$'
+```
+
+SHA-256 deduplikácia – identifikujte duplicitné súbory:
+```bash
+find <pracovny_adresar> -type f | xargs sha256sum | sort | uniq -d -w 64
+```
+
+Validácia každého súboru:
+```bash
+file -b subor
+identify subor 2>&1
+```
+
+Platné súbory presuňte do `valid/<format>/`, poškodené do `corrupted/`, duplicitné do `duplicates/`.
 
 **5. Zápis výsledkov a aktualizácia CoC:**
 
-Zapíšte výsledky file carving do dokumentácie prípadu:
-- Metóda obnovy – file_carving / hybrid
-- Celkový počet carved súborov (z PhotoRec)
-- Počet validných obrazových súborov
-- Počet poškodených súborov
-- Počet duplikátov
-- Miera validácie (%)
-- Miera duplikácie (%)
+Pri použití `--json-out` sa vytvorí JSON s výsledkami. Analytik manuálne skopíruje oba záznamy do `case.json`.
 
-Pridajte záznam do Chain of Custody:
+Pridávaný objekt `fileCarvingResult`:
+```json
+"fileCarvingResult": {
+  "timestamp": "2025-01-26T15:00:00Z",
+  "analyst": "Meno Analytika",
+  "recoveryMethod": "file_carving",
+  "totalCarved": 2341,
+  "validImageFiles": 1876,
+  "corrupted": 312,
+  "duplicates": 153,
+  "validationRate": 80.1,
+  "deduplicationRate": 6.5,
+  "outputPath": "/forenzne/pripady/PHOTORECOVERY-2025-01-26-001/PHOTORECOVERY-2025-01-26-001_carved/",
+  "photorec_log": "PHOTORECOVERY-2025-01-26-001_photorec.log"
+}
+```
+
+Nový záznam do poľa `chainOfCustody`:
 ```json
 {
   "timestamp": "2025-01-26T15:00:00Z",
   "analyst": "Meno Analytika",
-  "action": "File carving dokončený – nájdených N platných súborov, M duplikátov"
+  "action": "File carving dokončený – nájdených 1876 platných súborov, 153 duplikátov",
+  "mediaSerial": "SN-XXXXXXXX"
 }
 ```
 
@@ -110,8 +134,12 @@ Obnovené súbory organizované podľa formátu v `${CASE_ID}_carved/valid/<form
 
 ## Reference
 
-NIST SP 800-86 – Section 3.1.2.3 (Data Carving)
+ISO/IEC 27042:2015 – Section 5 (Digital evidence analysis)
+
+NIST SP 800-86 – Section 2.2 (Examination)
+
 Brian Carrier: File System Forensic Analysis – Chapter 14
+
 PhotoRec Documentation (https://www.cgsecurity.org/wiki/PhotoRec)
 
 ## Stav

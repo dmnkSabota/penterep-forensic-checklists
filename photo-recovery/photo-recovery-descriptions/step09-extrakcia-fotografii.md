@@ -57,7 +57,7 @@ Zlúčte hashes a identifikujte duplicitné hodnoty:
 ```bash
 cat /tmp/hashes_fs.txt /tmp/hashes_carved.txt | sort > /tmp/hashes_all.txt
 ```
-Ak rovnaký hash existuje v oboch zdrojoch, FS-based kópia má prednosť – skopírujte ju do `fs_based/[format]/`, carved kópiu presuňte do `duplicates/`. Typicky 15–25 % súborov pri hybridnom prístupe sú duplikáty.
+Ak rovnaký hash existuje v oboch zdrojoch, FS-based kópia má prednosť – skopírujte ju do `fs_based/[format]/`, carved kópiu presuňte do `duplicates/`. Miera duplikátov sa líši podľa stavu média a použitej stratégie obnovy.
 
 **5. Kopírovanie a organizácia:**
 
@@ -85,19 +85,31 @@ Vytvorte aj textový report `CONSOLIDATION_REPORT.txt` s prehľadom štatistík.
 
 **7. Zápis výsledkov a aktualizácia CoC:**
 
-Zapíšte výsledky konsolidácie do dokumentácie prípadu:
-- Počet súborov z filesystem recovery
-- Počet súborov z file carving
-- Počet odstránených duplikátov
-- Počet finálnych unikátnych súborov
-- Celková veľkosť datasetu (bajty)
+Pri použití `--json-out` sa vytvorí JSON s výsledkami. Analytik manuálne skopíruje oba záznamy do `case.json`.
 
-Pridajte záznam do Chain of Custody:
+Pridávaný objekt `photoConsolidation`:
+```json
+"photoConsolidation": {
+  "timestamp": "2025-01-26T15:30:00Z",
+  "analyst": "Meno Analytika",
+  "sourcesProcessed": ["filesystem_recovery", "file_carving"],
+  "filesFromFilesystem": 1223,
+  "filesFromCarving": 1876,
+  "duplicatesRemoved": 487,
+  "uniqueFiles": 2612,
+  "totalSizeBytes": 5368709120,
+  "masterCatalog": "PHOTORECOVERY-2025-01-26-001_consolidated/master_catalog.json",
+  "consolidationReport": "PHOTORECOVERY-2025-01-26-001_consolidated/CONSOLIDATION_REPORT.txt"
+}
+```
+
+Nový záznam do poľa `chainOfCustody`:
 ```json
 {
   "timestamp": "2025-01-26T15:30:00Z",
   "analyst": "Meno Analytika",
-  "action": "Konsolidácia dokončená – N unikátnych súborov, M duplikátov odstránených"
+  "action": "Konsolidácia dokončená – 2612 unikátnych súborov, 487 duplikátov odstránených",
+  "mediaSerial": "SN-XXXXXXXX"
 }
 ```
 
@@ -113,8 +125,11 @@ Konsolidovaný dataset v `${CASE_ID}_consolidated/`: podadresáre `fs_based/{jpg
 
 ## Reference
 
-ISO/IEC 27037:2012 – Section 7.3 (Data consolidation)
-NIST SP 800-86 – Section 3.1.3 (Analysis)
+ISO/IEC 27042:2015 – Section 5 (Digital evidence analysis)
+
+NIST SP 800-86 – Section 2.3 (Analysis)
+
+NIST FIPS 180-4 – Secure Hash Standard (SHA-256 pre deduplikáciu)
 
 ## Stav
 
