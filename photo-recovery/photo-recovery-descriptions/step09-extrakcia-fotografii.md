@@ -81,7 +81,7 @@ Vytvorte súbor `master_catalog.json` s inventárom každého súboru:
   }
 ]
 ```
-Vytvorte aj textový report `CONSOLIDATION_REPORT.txt` s prehľadom štatistík.
+Vytvorte aj súbor `${CASE_ID}_consolidation_report.json` s prehľadom štatistík.
 
 **7. Zápis výsledkov a aktualizácia CoC:**
 
@@ -99,7 +99,7 @@ Pridávaný objekt `photoConsolidation`:
   "uniqueFiles": 2612,
   "totalSizeBytes": 5368709120,
   "masterCatalog": "PHOTORECOVERY-2025-01-26-001_consolidated/master_catalog.json",
-  "consolidationReport": "PHOTORECOVERY-2025-01-26-001_consolidated/CONSOLIDATION_REPORT.txt"
+  "consolidationReport": "PHOTORECOVERY-2025-01-26-001_consolidation_report.json"
 }
 ```
 
@@ -117,7 +117,7 @@ Nový záznam do poľa `chainOfCustody`:
 
 Archivujte do dokumentácie prípadu:
 - `master_catalog.json` – kompletný inventár všetkých súborov
-- `CONSOLIDATION_REPORT.txt` – textový prehľad pre klienta
+- `${CASE_ID}_consolidation_report.json` – prehľad štatistík pre klienta
 
 ## Výsledek
 

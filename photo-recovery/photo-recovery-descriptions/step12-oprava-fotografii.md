@@ -18,7 +18,7 @@ Stredná
 
 ## Popis
 
-Nástroj načíta zoznam súborov s rozhodnutím `ATTEMPT_REPAIR` z výstupu predchádzajúceho kroku (`{CASE_ID}_repair_decisions.json`). Pre každý súbor priradí techniku podľa `corruptionType`, vykoná opravu na pracovnej kópii a následne validuje výsledok (PIL + jpeginfo). Originály zostávajú nedotknuté.
+Nástroj načíta zoznam súborov s rozhodnutím `ATTEMPT_REPAIR` z výstupu predchádzajúceho kroku (`{CASE_ID}_repair_decision.json`). Pre každý súbor priradí techniku podľa `corruptionType`, vykoná opravu na pracovnej kópii a následne validuje výsledok (PIL + jpeginfo). Originály zostávajú nedotknuté.
 
 Spúšťa sa iba ak výstup rozhodovacieho kroku obsahuje záznamy s `ATTEMPT_REPAIR`. Pri absencii takýchto záznamov skript skončí bez vykonania opráv.
 
@@ -28,9 +28,9 @@ Podporované formáty: JPEG (byte-level oprava), PNG (PIL resave). TIFF a RAW ni
 
 **1. Overenie predchádzajúcich výstupov:**
 
-Skontrolujte výstup rozhodovacieho kroku (`{CASE_ID}_repair_decisions.json`) – ak neobsahuje žiadne záznamy s `ATTEMPT_REPAIR`, tento nástroj preskočte a pokračujte na EXIF analýzu.
+Skontrolujte výstup rozhodovacieho kroku (`{CASE_ID}_repair_decision.json`) – ak neobsahuje žiadne záznamy s `ATTEMPT_REPAIR`, tento nástroj preskočte a pokračujte na EXIF analýzu.
 
-Poznačte si cestu k `{CASE_ID}_repair_decisions.json` (štandardne v output adresári).
+Poznačte si cestu k `{CASE_ID}_repair_decision.json` (štandardne v output adresári).
 
 **2. Inštalácia závislostí:**
 
@@ -52,7 +52,7 @@ ptphotorepair ${CASE_ID} --analyst "Meno Analytika" --json-out ${CASE_ID}_repair
 
 # Explicitná cesta k decisions súboru
 ptphotorepair ${CASE_ID} \
-  --decisions-file /var/forensics/images/${CASE_ID}_repair_decisions.json \
+  --decisions-file /var/forensics/images/${CASE_ID}_repair_decision.json \
   --analyst "Meno Analytika" --json-out ${CASE_ID}_repair_result.json
 
 # Simulácia bez skutočných zmien

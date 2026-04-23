@@ -37,7 +37,7 @@ Identifikujte cestu k zariadeniu (napr. `/dev/sdb`) – použijete ju vo všetk�
 ptmediareadability /dev/sdb PHOTORECOVERY-2025-01-26-001 --analyst "Meno Analytika"
 
 # S JSON výstupom pre case.json
-ptmediareadability /dev/sdb PHOTORECOVERY-2025-01-26-001 --analyst "Meno Analytika" --json-out result.json
+ptmediareadability /dev/sdb PHOTORECOVERY-2025-01-26-001 --analyst "Meno Analytika" --json-out ${CASE_ID}_readability.json
 ```
 
 Skript vykoná potvrdenie write-blockera (manuálna výzva) a následne automaticky predbežnú detekciu a diagnostické testy.
@@ -135,11 +135,10 @@ Pridávaný objekt `readabilityTest`:
 Nový záznam do poľa `chainOfCustody`:
 ```json
 {
-  "action": "Test čitateľnosti média – výsledok: READABLE",
-  "result": "SUCCESS",
-  "analyst": "Meno Analytika",
   "timestamp": "2025-01-26T10:00:00Z",
-  "selectedTool": "dc3dd"
+  "analyst": "Meno Analytika",
+  "action": "Test čitateľnosti média – výsledok: READABLE, nástroj: dc3dd",
+  "mediaSerial": "SN-XXXXXXXX"
 }
 ```
 

@@ -64,12 +64,12 @@ Informujte klienta o výsledkoch: počet obnovených fotografií, hodnotenie kva
 **4. Uzavretie Chain of Custody:**
 
 Pridajte záverečný záznam do `case.json`:
-
 ```json
 {
   "timestamp": "2025-01-26T18:30:00Z",
   "analyst": "Meno Analytika",
-  "action": "Prípad uzavretý – balík odovzdaný klientovi, pôvodné médium vrátené, stav: CLOSED"
+  "action": "Prípad uzavretý – balík odovzdaný klientovi, pôvodné médium vrátené, stav: CLOSED",
+  "mediaSerial": "SN-XXXXXXXX"
 }
 ```
 
@@ -77,7 +77,7 @@ Overte úplnosť záznamu – nesmú existovať časové medzery bez zodpovednej
 
 **5. Archivácia prípadu:**
 
-Archivujte všetky súbory prípadu s retenčnou lehotou 7 rokov podľa GDPR čl. 30. Archivácia zahŕňa:
+Archivujte všetky súbory prípadu v súlade s platnými právnymi predpismi o uchovávaní záznamov. Archivácia zahŕňa:
 - Forenzný obraz média (`{CASE_ID}.dd` + `.sha256`)
 - Všetky JSON výstupy jednotlivých krokov
 - Záverečnú správu a podpísaný odovzdávací protokol
@@ -89,23 +89,26 @@ Pred uzavretím overte:
 - Odovzdávací protokol podpísaný oboma stranami
 - Pôvodné médium vrátené klientovi
 - Chain of Custody bez medzier, stav `CLOSED`
-- Všetky súbory archivované s retenčnou lehotou 7 rokov
+- Všetky súbory archivované
 - `MANIFEST.json` uložený v dokumentácii prípadu
 
 ## Výsledek
 
-Záverečný balík odovzdaný klientovi. Obsah: obnovené fotografie, záverečná technická správa, `README.txt` a `MANIFEST.json` so SHA-256 kontrolnými súčtami. Chain of Custody uzavretá so stavom `CLOSED`. Všetky súbory archivované s retenčnou lehotou 7 rokov podľa GDPR čl. 30.
+Záverečný balík odovzdaný klientovi. Obsah: obnovené fotografie, záverečná technická správa, `README.txt` a `MANIFEST.json` so SHA-256 kontrolnými súčtami. Chain of Custody uzavretá so stavom `CLOSED`. Všetky súbory archivované v súlade s platnými právnymi predpismi.
 
 ## Reference
 
-ISO/IEC 27037:2012 – Uchovávanie digitálnych dôkazov
-NIST SP 800-86 – Section 3.4 (Reporting)
-ACPO Good Practice Guide – Principle 4 (Documentation)
-GDPR čl. 30 – Záznamy o spracovateľských činnostiach
+ISO/IEC 27037:2012 – Section 5.5 (Preservation)
+
+NIST SP 800-86 – Section 2.4 (Reporting)
+
+ACPO Good Practice Guide – Principle 4 (Overall responsibility for compliance)
+
+GDPR (Nariadenie EÚ 2016/679) – Článok 30 (Záznamy o spracovateľských činnostiach)
 
 ## Stav
 
-Manuálny proces – netestovateľný automaticky
+K otestovaniu
 
 ## Nález
 

@@ -38,10 +38,10 @@ ptrepairdecision ${CASE_ID}
 ptrepairdecision ${CASE_ID} --analyst "Meno Analytika" --json-out ${CASE_ID}_decisions.json
 
 # Explicitná cesta k validation reportu
-ptrepairdecision ${CASE_ID} --validation-file /var/forensics/images/${CASE_ID}_integrity_validation.json
+ptrepairdecision ${CASE_ID} --validation-file /var/forensics/images/${CASE_ID}_validation_report.json
 ```
 
-Skript automaticky načíta `{CASE_ID}_integrity_validation.json` z výstupného adresára.
+Skript automaticky načíta `{CASE_ID}_validation_report.json` z výstupného adresára.
 
 **2. Rozhodovacia logika:**
 
@@ -65,7 +65,7 @@ Na základe miery úspešnosti sa aplikujú pravidlá R1–R3 v poradí, prvé p
 | R2 | 30 % ≤ úspešnosť < 50 % | `MANUAL_REVIEW` |
 | R3 | Úspešnosť < 30 % | `SKIP` |
 
-Ak automatický nástroj nie je dostupný, otvorte `{CASE_ID}_integrity_validation.json`, pre každý súbor so statusom `REPAIRABLE` vyhľadajte `corruptionType` v tabuľke vyššie, aplikujte pravidlá R1–R3 a výsledné rozhodnutie zapíšte ručne do `{CASE_ID}_repair_decisions.json`.
+Ak automatický nástroj nie je dostupný, otvorte `{CASE_ID}_validation_report.json`, pre každý súbor so statusom `REPAIRABLE` vyhľadajte `corruptionType` v tabuľke vyššie, aplikujte pravidlá R1–R3 a výsledné rozhodnutie zapíšte ručne do `{CASE_ID}_repair_decision.json`.
 
 **3. Zápis výsledkov a aktualizácia CoC:**
 
@@ -86,7 +86,7 @@ Pridávaný objekt `repairDecision`:
     "corrupt_segments": {"count": 31, "decision": "ATTEMPT_REPAIR", "rule": "R1"},
     "corrupt_data": {"count": 16, "decision": "MANUAL_REVIEW", "rule": "R2"}
   },
-  "decisionFile": "PHOTORECOVERY-2025-01-26-001_repair_decisions.json"
+  "decisionFile": "PHOTORECOVERY-2025-01-26-001_repair_decision.json"
 }
 ```
 
@@ -103,11 +103,11 @@ Nový záznam do poľa `chainOfCustody`:
 **4. Archivácia výstupov:**
 
 Archivujte do dokumentácie prípadu:
-- `${CASE_ID}_repair_decisions.json` – zoznam rozhodnutí s typom poškodenia, mierou úspešnosti, použitým pravidlom a odôvodnením pre každý súbor
+- `${CASE_ID}_repair_decision.json` – zoznam rozhodnutí s typom poškodenia, mierou úspešnosti, použitým pravidlom a odôvodnením pre každý súbor
 
 ## Výsledek
 
-Čistá analytická operácia – žiadne súbory sa nekopírujú ani nemenia. Výsledky zaznamenané v `{CASE_ID}_repair_decisions.json`. Workflow pokračuje do opravy fotografií (ak existujú záznamy `ATTEMPT_REPAIR`) alebo priamo do EXIF analýzy (ak všetky záznamy sú `MANUAL_REVIEW` / `SKIP`).
+Čistá analytická operácia – žiadne súbory sa nekopírujú ani nemenia. Výsledky zaznamenané v `{CASE_ID}_repair_decision.json`. Workflow pokračuje do opravy fotografií (ak existujú záznamy `ATTEMPT_REPAIR`) alebo priamo do EXIF analýzy (ak všetky záznamy sú `MANUAL_REVIEW` / `SKIP`).
 
 ## Reference
 

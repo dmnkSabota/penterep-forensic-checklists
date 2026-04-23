@@ -62,10 +62,10 @@ Tieto hodnoty použijete ako parametre skriptu.
 ptforensicimaging PHOTORECOVERY-2025-01-26-001 /dev/sdb dc3dd --analyst "Meno Analytika"
 
 # S JSON výstupom pre case.json
-ptforensicimaging PHOTORECOVERY-2025-01-26-001 /dev/sdb dc3dd --analyst "Meno Analytika" --json-out imaging_result.json
+ptforensicimaging PHOTORECOVERY-2025-01-26-001 /dev/sdb dc3dd --analyst "Meno Analytika" --json-out ${CASE_ID}_imaging.json
 
 # Pre PARTIAL médium (ddrescue)
-ptforensicimaging PHOTORECOVERY-2025-01-26-001 /dev/sdb ddrescue --analyst "Meno Analytika" --json-out imaging_result.json
+ptforensicimaging PHOTORECOVERY-2025-01-26-001 /dev/sdb ddrescue --analyst "Meno Analytika" --json-out ${CASE_ID}_imaging.json
 ```
 
 Skript vykoná potvrdenie write-blockera, kontrolu predpokladov a následne automaticky vykoná imaging a vytvorí kanonický hash súbor.
@@ -187,7 +187,7 @@ NIST FIPS 180-4 – Secure Hash Standard (SHA-256 specification)
 
 ## Stav
 
-Otestované
+K otestovaniu
 
 ## Nález
 

@@ -41,7 +41,7 @@ CASE_ID="PHOTORECOVERY-2025-01-26-001"
 ptintegrityvalidation ${CASE_ID}
 
 # S JSON výstupom pre case.json
-ptintegrityvalidation ${CASE_ID} --analyst "Meno Analytika" --json-out ${CASE_ID}_validation.json
+ptintegrityvalidation ${CASE_ID} --analyst "Meno Analytika" --json-out ${CASE_ID}_validation_report.json
 
 # Simulácia bez čítania súborov
 ptintegrityvalidation ${CASE_ID} --dry-run
@@ -80,7 +80,7 @@ pngcheck -v subor.png
 tiffinfo subor.tiff
 ```
 
-Výsledok zaznamenajte ručne do `{CASE_ID}_integrity_validation.json` s poliami `path`, `status` a `corruptionType`.
+Výsledok zaznamenajte ručne do `{CASE_ID}_validation_report.json` s poliami `path`, `status` a `corruptionType`.
 
 Súbory sa fyzicky nepresúvajú. Stav každého súboru sa zaznamenáva iba v JSON výstupe.
 
@@ -105,7 +105,7 @@ Pridávaný objekt `integrityValidation`:
     "invalid_header": 16,
     "unknown": 0
   },
-  "validationCatalog": "PHOTORECOVERY-2025-01-26-001_integrity_validation.json"
+  "validationCatalog": "PHOTORECOVERY-2025-01-26-001_validation_report.json"
 }
 ```
 
@@ -122,11 +122,11 @@ Nový záznam do poľa `chainOfCustody`:
 **5. Archivácia výstupov:**
 
 Archivujte do dokumentácie prípadu:
-- `${CASE_ID}_integrity_validation.json` – klasifikácia každého súboru s cestou, stavom a typom poškodenia
+- `${CASE_ID}_validation_report.json` – klasifikácia každého súboru s cestou, stavom a typom poškodenia
 
 ## Výsledek
 
-Každý súbor v konsolidovanom adresári je klasifikovaný ako VALID, REPAIRABLE alebo CORRUPTED. Výsledky uložené v `{CASE_ID}_integrity_validation.json` s per-file záznamy (path, status, corruptionType). Súbory zostávajú na pôvodnom mieste – žiadne kopírovanie. Workflow pokračuje do rozhodnutia o oprave.
+Každý súbor v konsolidovanom adresári je klasifikovaný ako VALID, REPAIRABLE alebo CORRUPTED. Výsledky uložené v `{CASE_ID}_validation_report.json` s per-file záznamy (path, status, corruptionType). Súbory zostávajú na pôvodnom mieste – žiadne kopírovanie. Workflow pokračuje do rozhodnutia o oprave.
 
 ## Reference
 
